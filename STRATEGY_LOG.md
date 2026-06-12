@@ -126,4 +126,3 @@ Change: + Scalp mode: close 100% at partial TP level (max win rate)
 Params: london_end=12h, tp=1.0×, rmax=1.5×, rmin=0.2×, partial_r=1.0, scalp=True, adx_min=20.0, time_stop=8h  
 OOS: trades=14, win=57.1%, exp=+1.496, PF=1.233, DD=33.3  
 Verdict: **❌ REJECTED**
-

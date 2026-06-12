@@ -138,8 +138,7 @@ def _append_to_log(new_entries: list, new_details: list, all_entries: list) -> N
         "----------------------------------------------------------|"
         "--------|--------|-----------|-------|----------|--------|\n"
     )
-    rows    = "\n".join(_row(e) for e in all_entries)
-    details = "\n\n---\n\n".join(new_details)
+    rows = "\n".join(_row(e) for e in all_entries)
 
     # Read existing detail sections to preserve round-1 notes
     existing = ""
@@ -149,14 +148,20 @@ def _append_to_log(new_entries: list, new_details: list, all_entries: list) -> N
         if marker in text:
             existing = text.split(marker, 1)[1].strip()
 
+    # Skip sections already in the log so re-runs stay idempotent
+    fresh = [d for d in new_details if d.splitlines()[0].strip() not in existing]
+    details = "\n\n---\n\n".join(fresh)
+
+    parts = [p for p in (existing, details) if p]
     content = (
         header + rows
         + "\n\n---\n\n## Detailed Results\n\n"
-        + (existing + "\n\n---\n\n" if existing else "")
-        + details + "\n"
+        + "\n\n---\n\n".join(parts) + "\n"
     )
     LOG_PATH.write_text(content)
-    print(f"[log] STRATEGY_LOG.md updated ({len(all_entries)} total entries)")
+    skipped = len(new_details) - len(fresh)
+    note = f", {skipped} duplicate section(s) skipped" if skipped else ""
+    print(f"[log] STRATEGY_LOG.md updated ({len(all_entries)} total entries{note})")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
