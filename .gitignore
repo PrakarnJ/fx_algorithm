@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Data files — regenerate with generate_synthetic.py or download with download.py
+data/*.csv
+
+# Logs
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Credentials / secrets — NEVER commit these
+*.env
+.env*
+credentials.json
+secrets.py
+mt5_credentials.py
+
+# Claude Code internal files
+.claude/
+
+# Distribution / build
+dist/
+build/
+*.egg-info/
