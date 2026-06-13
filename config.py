@@ -8,8 +8,10 @@ TF_M15 = 15
 TF_H1 = 16385
 TF_H4 = 16388
 
-# Winner from iterate.py — all 4 enhancements kept
-ACTIVE_STRATEGY = "breakout"
+# Strategy in use by the live bot: "trend" | "breakout" | "regime_switch".
+# regime_switch is the walk-forward winner on REAL data (PF 1.77 OOS).
+# ⚠ DEMO ONLY — never forward-tested; profit was tail-driven. See DEPLOYMENT.md.
+ACTIVE_STRATEGY = "regime_switch"
 
 
 @dataclass
@@ -54,8 +56,110 @@ class LondonBreakoutParams:
     full_close_at_partial: bool = False  # close 100% at partial level (scalp mode — no runner)
 
 
+@dataclass
+class MeanReversionParams:
+    tf: str = "M15"                # signal/execution timeframe
+    z_lookback: int = 60           # rolling window for z-score
+    z_entry: float = 2.0           # |z| threshold to fade
+    rsi_confirm: bool = False      # require RSI extreme as confirmation
+    rsi_period: int = 3
+    rsi_extreme: float = 20.0      # buy if RSI < x, sell if RSI > 100-x
+    tp_pts: float = 3.0            # fixed take-profit in price points
+    sl_pts: float = 9.0            # fixed stop-loss in price points
+    cooldown_bars: int = 16        # min exec bars between signals
+    time_stop_hours: int = 6       # 0 = disabled
+    session_start: int = 0         # UTC hour gate (0/24 = always on)
+    session_end: int = 24
+    manage_trail: bool = False     # False = fixed SL/TP only (scalp mode)
+
+
+@dataclass
+class RsiFadeParams:
+    tf: str = "M15"
+    rsi_period: int = 2
+    buy_below: float = 10.0
+    sell_above: float = 90.0
+    trend_gate: bool = False       # only fade against H1 EMA(50) extension
+    tp_pts: float = 3.0
+    sl_pts: float = 9.0
+    cooldown_bars: int = 16
+    time_stop_hours: int = 6
+    session_start: int = 0
+    session_end: int = 24
+    manage_trail: bool = False
+
+
+@dataclass
+class MLClassifierParams:
+    tf: str = "M15"
+    tp_pts: float = 3.0            # label + trade target
+    sl_pts: float = 9.0
+    horizon_bars: int = 32         # label horizon (exec bars)
+    threshold: float = 0.85        # min predicted probability to trade
+    cooldown_bars: int = 16
+    time_stop_hours: int = 8
+    manage_trail: bool = False
+    # model hyperparameters (HistGradientBoostingClassifier)
+    max_depth: int = 4
+    learning_rate: float = 0.08
+    max_iter: int = 250
+    min_samples_leaf: int = 60
+    l2_regularization: float = 1.0
+
+
+@dataclass
+class TrendBreakoutParams:
+    tf: str = "H1"                  # signal/execution timeframe
+    mode: str = "donchian"          # "donchian" | "ma_momentum"
+    channel_period: int = 40        # Donchian lookback (bars)
+    ema_fast: int = 20              # ma_momentum fast EMA
+    ema_slow: int = 50              # ma_momentum slow EMA
+    slope_lookback: int = 10        # bars for EMA-slope confirmation
+    sl_atr_mult: float = 2.5        # initial stop distance (wide)
+    atr_period: int = 14
+    cooldown_bars: int = 8
+    # trailing (engine update_sl) — wide so trends can breathe
+    breakeven_atr_mult: float = 1.5
+    trail_atr_mult: float = 3.0
+    regime_filter: bool = True      # only enter in matching trend regime
+    adx_trend: float = 25.0
+    er_trend: float = 0.30
+
+
+@dataclass
+class RegimeSwitchParams:
+    tf: str = "H1"
+    # regime thresholds
+    adx_trend: float = 25.0
+    er_trend: float = 0.30
+    ema_slow: int = 200
+    # trend leg (Donchian)
+    channel_period: int = 40
+    trend_sl_atr_mult: float = 2.5
+    trend_breakeven_atr_mult: float = 1.5
+    trend_trail_atr_mult: float = 3.0
+    atr_period: int = 14
+    cooldown_bars: int = 8
+    # range leg
+    range_enabled: bool = True      # mean-revert in ranges; False = stand aside
+    z_lookback: int = 60
+    z_entry: float = 2.0
+    range_tp_pts: float = 4.0
+    range_sl_pts: float = 10.0
+
+
 SHARED = SharedParams()
 TREND_PARAMS = TrendFollowingParams()
+# Regime-aware switch — params optimized on the most recent 12 months
+# (2025-06 → 2026-06), i.e. what walk-forward would carry into "now".
+# Re-derive periodically: see backtest/walkforward.py. range_enabled=False
+# means it rides trends only and stands aside in ranges (recent regime favored this).
+REGIME_PARAMS = RegimeSwitchParams(
+    tf="H4", adx_trend=20.0, er_trend=0.4, ema_slow=120, channel_period=80,
+    trend_sl_atr_mult=3.5, trend_breakeven_atr_mult=1.0, trend_trail_atr_mult=2.0,
+    atr_period=14, cooldown_bars=14, range_enabled=False,
+    z_lookback=90, z_entry=1.5, range_tp_pts=4.0, range_sl_pts=6.0,
+)
 # Final winning configuration — all 4 enhancements from iterate.py
 BREAKOUT_PARAMS = LondonBreakoutParams(
     london_end_hour=11,

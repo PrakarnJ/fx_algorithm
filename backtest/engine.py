@@ -59,16 +59,20 @@ def run_backtest_fast(
     shared: SharedParams,
     dfs: dict,
     spread_points: int = SPREAD_POINTS,
+    exec_tf: str = "H1",
 ) -> List[Trade]:
-    h1 = dfs["H1"]
+    """exec_tf selects the bar series trades execute on ("H1" or "M15").
+    M15 gives 4x finer fill granularity for small-TP scalp strategies."""
+    bars = dfs[exec_tf]
+    bars_per_hour = 4 if exec_tf == "M15" else 1
     spread = spread_points * 0.01
 
     signal_df = strategy.generate_signals(dfs)
     if signal_df is None or len(signal_df) == 0:
         return []
 
-    # Align signal times (may be M15) to nearest H1 bar at-or-after
-    h1_index = h1.index
+    # Align signal times to nearest exec bar at-or-after
+    h1_index = bars.index
     sig_lookup: dict = {}
     for sig_time in signal_df.index:
         pos = h1_index.searchsorted(sig_time)
@@ -78,17 +82,17 @@ def run_backtest_fast(
         if h1_time not in sig_lookup:
             sig_lookup[h1_time] = signal_df.loc[sig_time]
 
-    warmup_time   = h1_index[250]
+    warmup_time   = h1_index[250 * bars_per_hour]
     trades: List[Trade] = []
     open_trade: Optional[Trade] = None
     consec_losses = 0
     pause_until: Optional[pd.Timestamp] = None
 
-    for i in range(len(h1)):
+    for i in range(len(bars)):
         bar_time = h1_index[i]
         if bar_time < warmup_time:
             continue
-        bar = h1.iloc[i]
+        bar = bars.iloc[i]
         high, low, close = bar["high"], bar["low"], bar["close"]
 
         # ── Manage open trade ─────────────────────────────────────
@@ -124,8 +128,8 @@ def run_backtest_fast(
                         open_trade.partial_done = True
                         open_trade.sl = open_trade.entry_price  # move to break-even
 
-            # Time-stop: close at bar close after N hours
-            if open_trade.time_stop_hours > 0 and open_trade.open_bars >= open_trade.time_stop_hours:
+            # Time-stop: close at bar close after N hours (open_bars counts exec bars)
+            if open_trade.time_stop_hours > 0 and open_trade.open_bars >= open_trade.time_stop_hours * bars_per_hour:
                 _close_trade(open_trade, close, bar_time, trades)
                 consec_losses = consec_losses + 1 if open_trade.profit_pts < 0 else 0
                 open_trade = None
@@ -186,7 +190,7 @@ def run_backtest_fast(
         )
 
     if open_trade is not None:
-        _close_trade(open_trade, h1.iloc[-1]["close"], h1.index[-1], trades)
+        _close_trade(open_trade, bars.iloc[-1]["close"], bars.index[-1], trades)
 
     return trades
 

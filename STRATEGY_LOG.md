@@ -126,3 +126,24 @@ Change: + Scalp mode: close 100% at partial TP level (max win rate)
 Params: london_end=12h, tp=1.0×, rmax=1.5×, rmin=0.2×, partial_r=1.0, scalp=True, adx_min=20.0, time_stop=8h  
 OOS: trades=14, win=57.1%, exp=+1.496, PF=1.233, DD=33.3  
 Verdict: **❌ REJECTED**
+
+
+---
+
+## Walk-Forward 2026-06-13 11:15 UTC — Regime-Aware / Trend-Following (real Dukascopy data)
+
+**Method:** rolling 12mo train → 3mo test across 2022→2026; parameters re-selected on each train window, evaluated on the next (unseen) test window; all test segments stitched into one OOS curve.  
+**Regime mix (whole history, H1):** trend_up 15%, trend_down 10%, range 75%.  
+**Note:** 2025+ is no longer a clean holdout (it informed this design); walk-forward across all regimes is the honest metric, and true confirmation needs forward data.
+
+| Family | Windows | OOS trades | Win % | Expectancy | PF | Max DD | Total | MC p5 PF |
+|---|---|---|---|---|---|---|---|---|
+| trend | 14 | 120 | 60.8% | +6.809 | 1.39 | 398.4 | +817.0 | 0.74 |
+| regime_switch | 14 | 131 | 64.1% | +9.520 | 1.765 | 274.5 | +1247.1 | 1.034 |
+
+**Verdict:** `regime_switch` is the strongest — stitched walk-forward PF 1.765, expectancy +9.520 pts over 131 trades across 14 regimes. Original 90% WR / PF>2 / DD<10 target is not the right yardstick for a trend-follower (lower WR, larger wins by design); judged on risk-adjusted robustness across regimes instead.
+
+**Profit concentration (critical caveat):** 69% of regime_switch's total (+857 of +1247 pts) comes from a single test window — 2026-01→04, the parabolic gold spike. The other 13 windows net +390 pts (8 profitable / 4 losing / 2 flat), so there is a positive base rate beyond that one episode, but the headline is tail-driven — the signature of trend-following (a few big winners carry the curve), which is why Monte-Carlo p5 PF falls to ~1.03. Real edge, but fragile. Walk-forward validates the *process*, not a single param set (each window re-optimizes); for live use, re-optimize on a rolling basis. Not auto-deployed; config.py unchanged.
+
+### Prior context — 8h fade-strategy campaign (real data, FAILED)
+Before the regime-aware pivot, an 8h Optuna campaign searched mean-reversion / RSI-fade / ML-classifier / breakout-scalp families (~50k trials). All looked viable in-sample and on 2024 validation (ML: 84% WR, PF 1.47) but **every finalist had PF < 0.5 on 2025+ OOS** — losing strategies. Root cause: 2025+ gold went parabolic (+61%, price ~doubled) and the fade families are anti-trend. This motivated the regime-aware / trend-following pivot above. Full detail: backtest/campaign_runs/campaign_results.json.

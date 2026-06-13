@@ -8,6 +8,7 @@ to 'trend' or 'breakout' based on the walk-forward winner.
 """
 import time
 import logging
+from dataclasses import replace
 from datetime import datetime, timezone
 
 import MetaTrader5 as mt5
@@ -17,11 +18,32 @@ import executor
 import trade_manager
 from risk_manager import calculate_lot, DrawdownGuard
 from config import (
-    SYMBOL, MAGIC, SHARED, TREND_PARAMS, BREAKOUT_PARAMS,
+    SYMBOL, MAGIC, SHARED, TREND_PARAMS, BREAKOUT_PARAMS, REGIME_PARAMS,
     TF_M15, TF_H1, TF_H4, ACTIVE_STRATEGY,
 )
 from strategies.trend_following import TrendFollowingStrategy
 from strategies.london_breakout import LondonBreakoutStrategy
+from strategies.regime_switch import RegimeSwitchStrategy
+
+# A "far" TP (used by the trend leg, which exits via trailing stop, not a
+# fixed target). Sent to MT5 as 0.0 = no take-profit.
+FAR_TP_THRESHOLD = 100_000
+
+
+def _build_strategy():
+    """Return (strategy, shared). regime_switch needs a wider trailing stop
+    than the default SHARED so trends can run — apply it to the shared that
+    the live management loop also uses."""
+    if ACTIVE_STRATEGY == "trend":
+        return TrendFollowingStrategy(TREND_PARAMS, SHARED), SHARED
+    if ACTIVE_STRATEGY == "regime_switch":
+        shared = replace(
+            SHARED,
+            breakeven_atr_mult=REGIME_PARAMS.trend_breakeven_atr_mult,
+            trail_atr_mult=REGIME_PARAMS.trend_trail_atr_mult,
+        )
+        return RegimeSwitchStrategy(REGIME_PARAMS, shared), shared
+    return LondonBreakoutStrategy(BREAKOUT_PARAMS, SHARED), SHARED
 
 logging.basicConfig(
     level=logging.INFO,
@@ -44,12 +66,10 @@ def run():
     account = conn.connect()
     log.info(f"Connected: {account['login']}  balance={account['balance']:.2f} {account['currency']}")
 
-    strategy = (
-        TrendFollowingStrategy(TREND_PARAMS, SHARED)
-        if ACTIVE_STRATEGY == "trend"
-        else LondonBreakoutStrategy(BREAKOUT_PARAMS, SHARED)
-    )
-    guard = DrawdownGuard(SHARED)
+    strategy, shared = _build_strategy()
+    log.info(f"Strategy: {ACTIVE_STRATEGY}  (trail={shared.trail_atr_mult}x ATR, "
+             f"risk={shared.risk_pct:.1%}/trade)")
+    guard = DrawdownGuard(shared)
 
     try:
         while True:
@@ -68,7 +88,7 @@ def run():
                 direction = "buy" if is_buy else "sell"
 
                 new_sl = trade_manager.update_sl(
-                    direction, pos["price_open"], pos["sl"], atr_val, current_price, SHARED
+                    direction, pos["price_open"], pos["sl"], atr_val, current_price, shared
                 )
                 if abs(new_sl - pos["sl"]) > 1e-5:
                     if executor.modify_sl(pos["ticket"], new_sl):
@@ -77,7 +97,7 @@ def run():
             # ── Check for new entry ───────────────────────────────────────
             if not positions and guard.is_allowed(balance, now):
                 symbol_info = conn.get_symbol_info(SYMBOL)
-                if symbol_info.spread > SHARED.max_spread_points:
+                if symbol_info.spread > shared.max_spread_points:
                     log.debug(f"Spread {symbol_info.spread} > max, skipping")
                 else:
                     dfs = {
@@ -88,12 +108,16 @@ def run():
                     signal = strategy.get_signal(dfs)
                     if signal:
                         sl_distance = abs(signal.entry_price - signal.sl)
-                        lot = calculate_lot(balance, SHARED.risk_pct, sl_distance, symbol_info)
+                        lot = calculate_lot(balance, shared.risk_pct, sl_distance, symbol_info)
+                        # Trend leg has no fixed TP (rides the trailing stop) —
+                        # send 0.0 to MT5 instead of the far placeholder TP.
+                        tp = 0.0 if abs(signal.tp - signal.entry_price) > FAR_TP_THRESHOLD else signal.tp
                         comment = f"atr={signal.atr:.5f}"
-                        executor.place_order(SYMBOL, signal.direction, lot, signal.sl, signal.tp, MAGIC, comment)
+                        executor.place_order(SYMBOL, signal.direction, lot, signal.sl, tp, MAGIC, comment)
                         log.info(
                             f"ORDER  {signal.direction.upper()}  {lot} lots  "
-                            f"entry≈{signal.entry_price:.2f}  SL={signal.sl:.2f}  TP={signal.tp:.2f}"
+                            f"entry≈{signal.entry_price:.2f}  SL={signal.sl:.2f}  "
+                            f"TP={'trail' if tp == 0.0 else f'{tp:.2f}'}"
                         )
 
             time.sleep(LOOP_INTERVAL)

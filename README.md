@@ -49,6 +49,18 @@ This writes `data/XAUUSD_{M15,H1,H4}.csv` (2022-01-01 → 2026-01-01, seeded GBM
 
 After running `compare.py`, set `ACTIVE_STRATEGY` in `config.py` to the recommended strategy (`'trend'` or `'breakout'`).
 
+## Performance report (web dashboard)
+
+A static dashboard visualizes backtest performance — equity curve + drawdown, monthly P&L, trade distribution, a sortable trade explorer, and an out-of-sample comparison of every variant ever tested.
+
+```bash
+.venv/bin/python3 backtest/export_report.py     # regenerate report/data.json from backtests
+.venv/bin/python3 -m http.server 8765 -d report # serve the dashboard
+# open http://localhost:8765
+```
+
+The exporter re-runs the four reproducible configurations (trend best-IS, breakout baseline, logged B-v4, deployed config) on both the OOS window (2025+) and full history. Charts use ECharts from a CDN; no build step required.
+
 ## Project layout
 
 ```
@@ -65,9 +77,11 @@ backtest/
   compare.py              # orchestrates optimize → walk-forward → decision
   iterate.py              # incremental enhancement ladder, logs to STRATEGY_LOG.md
   metrics.py              # win rate, expectancy, profit factor, drawdown, Sharpe
+  export_report.py        # exports backtest results to report/data.json for the dashboard
 data/
   generate_synthetic.py   # seeded synthetic GBM CSVs for offline testing
   download.py             # real MT5 bars (Windows only)
+report/                   # static web dashboard (index.html + app.js + style.css + data.json)
 indicators.py             # EMA, RSI, ATR, ADX (Wilder)
 trade_manager.py          # break-even + ATR trailing SL — shared by bot.py and the backtester
 risk_manager.py           # position sizing (1% risk), drawdown guard (loss streak pause, daily stop)

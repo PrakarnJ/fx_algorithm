@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>XAUUSD Bot — Performance Report</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <span class="brand-dot"></span>
+      <h1>XAUUSD Trading Bot <span class="brand-sub">Performance Report</span></h1>
+    </div>
+    <div class="topbar-actions">
+      <span id="generated-at" class="meta-text"></span>
+      <button id="theme-toggle" class="btn-icon" title="Toggle theme">◐</button>
+    </div>
+  </div>
+</header>
+
+<div class="banner" id="disclaimer-banner">
+  ⚠ <strong>Real XAUUSD (Dukascopy) 2022–2026.</strong> The ★ walk-forward variants are true out-of-sample
+  (parameters re-selected on past data each window). Caveat: 2025+ is no longer a pristine holdout, and the
+  regime-switch profit is tail-driven (~69% from one 2026 window). True confirmation needs forward data — not for live use as-is.
+</div>
+
+<main class="container">
+
+  <!-- Controls -->
+  <section class="controls">
+    <div class="control-group" id="variant-pills"></div>
+    <div class="control-group window-toggle" id="window-toggle">
+      <button data-window="oos" class="active">Out-of-sample (2025+)</button>
+      <button data-window="full">Full history (2022+)</button>
+    </div>
+  </section>
+
+  <p class="variant-desc" id="variant-desc"></p>
+  <p class="mc-note" id="mc-note" style="display:none"></p>
+
+  <!-- KPI cards -->
+  <section class="kpi-grid" id="kpi-grid"></section>
+
+  <!-- Charts -->
+  <section class="chart-card chart-wide">
+    <div class="chart-head">
+      <h2>Equity Curve &amp; Drawdown</h2>
+      <span class="chart-note">cumulative profit (points) per closed trade</span>
+    </div>
+    <div id="chart-equity" class="chart chart-tall"></div>
+  </section>
+
+  <section class="chart-row">
+    <div class="chart-card">
+      <div class="chart-head"><h2>Monthly P&amp;L</h2></div>
+      <div id="chart-monthly" class="chart"></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-head"><h2>Trade P&amp;L Distribution</h2></div>
+      <div id="chart-hist" class="chart"></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-head"><h2>Win / Loss</h2></div>
+      <div id="chart-donut" class="chart"></div>
+    </div>
+  </section>
+
+  <!-- Trade explorer -->
+  <section class="chart-card chart-wide">
+    <div class="chart-head">
+      <h2>Trade Explorer</h2>
+      <div class="table-filters" id="trade-filters">
+        <button data-filter="all" class="active">All</button>
+        <button data-filter="wins">Wins</button>
+        <button data-filter="losses">Losses</button>
+        <button data-filter="buy">Buys</button>
+        <button data-filter="sell">Sells</button>
+      </div>
+    </div>
+    <div class="table-scroll">
+      <table id="trade-table">
+        <thead>
+          <tr>
+            <th data-sort="entry_time">Entry time</th>
+            <th data-sort="direction">Dir</th>
+            <th data-sort="entry" class="num">Entry</th>
+            <th data-sort="exit" class="num">Exit</th>
+            <th data-sort="sl" class="num">SL</th>
+            <th data-sort="tp" class="num">TP</th>
+            <th data-sort="exit_time">Exit time</th>
+            <th data-sort="profit_pts" class="num">P&amp;L (pts)</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p class="table-foot" id="trade-count-foot"></p>
+  </section>
+
+  <!-- Strategy comparison -->
+  <section class="section-divider">
+    <h2>All Strategies Tested — Out-of-Sample Comparison</h2>
+    <p class="meta-text">Every variant from STRATEGY_LOG.md, evaluated on the 2025+ window the optimizer never saw.</p>
+  </section>
+
+  <section class="chart-row chart-row-3">
+    <div class="chart-card">
+      <div class="chart-head"><h2>Win Rate %</h2></div>
+      <div id="chart-cmp-wr" class="chart chart-cmp"></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-head"><h2>Expectancy (pts/trade)</h2></div>
+      <div id="chart-cmp-exp" class="chart chart-cmp"></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-head"><h2>Profit Factor</h2></div>
+      <div id="chart-cmp-pf" class="chart chart-cmp"></div>
+    </div>
+  </section>
+
+  <section class="chart-card chart-wide">
+    <div class="chart-head"><h2>Master Strategy Table</h2></div>
+    <div class="table-scroll">
+      <table id="master-table">
+        <thead>
+          <tr>
+            <th>Variant</th>
+            <th>Key rules / changes</th>
+            <th class="num">Trades</th>
+            <th class="num">Win %</th>
+            <th class="num">Expectancy</th>
+            <th class="num">PF</th>
+            <th class="num">Max DD</th>
+            <th>Verdict</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <span id="footer-meta"></span>
+  </footer>
+
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>
