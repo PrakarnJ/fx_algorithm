@@ -160,6 +160,17 @@ REGIME_PARAMS = RegimeSwitchParams(
     atr_period=14, cooldown_bars=14, range_enabled=False,
     z_lookback=90, z_entry=1.5, range_tp_pts=4.0, range_sl_pts=6.0,
 )
+
+# Live override: the re-optimize pipeline / dashboard "Apply" writes the latest
+# approved params here. If present, it supersedes the defaults above — so the
+# bot picks up re-optimized params without editing source. Delete to revert.
+import json as _json, os as _os
+_REGIME_OVERRIDE = _os.path.join(_os.path.dirname(__file__), "data", "regime_params.json")
+if _os.path.exists(_REGIME_OVERRIDE):
+    try:
+        REGIME_PARAMS = RegimeSwitchParams(**_json.load(open(_REGIME_OVERRIDE)))
+    except Exception as _e:
+        print(f"[config] ignoring bad regime_params.json: {_e}")
 # Final winning configuration — all 4 enhancements from iterate.py
 BREAKOUT_PARAMS = LondonBreakoutParams(
     london_end_hour=11,

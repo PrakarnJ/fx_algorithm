@@ -17,6 +17,13 @@ data/*.csv
 *.log
 logs/
 
+# Campaign / re-optimize run artifacts (regenerated; keep only result JSONs)
+backtest/campaign_runs/*.out
+backtest/campaign_runs/started_at
+backtest/campaign_runs/checkpoint.json
+backtest/campaign_runs/reoptimize_*
+backtest/campaign_runs/_duka_tmp/
+
 # IDE
 .vscode/
 .idea/
