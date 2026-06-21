@@ -29,12 +29,22 @@ def compute_metrics(trades: List[Trade]) -> dict:
     peak = np.maximum.accumulate(cum)
     max_dd = float(np.max(peak - cum)) if len(cum) > 0 else 0.0
 
-    # Per-trade Sharpe approximation
+    # Sharpe annualized by actual trade frequency (not a fixed √252 daily assumption)
     sharpe = 0.0
     if len(profits) > 1:
         std = float(np.std(profits, ddof=1))
         if std > 0:
-            sharpe = float(np.mean(profits)) / std * np.sqrt(252)
+            times = [t.entry_time for t in trades
+                     if t.profit_pts is not None and t.entry_time is not None]
+            if len(times) >= 2:
+                span_years = max(
+                    (max(times) - min(times)).total_seconds() / (365.25 * 86400),
+                    1.0 / 52,
+                )
+                trades_per_year = len(profits) / span_years
+            else:
+                trades_per_year = 252
+            sharpe = float(np.mean(profits)) / std * np.sqrt(trades_per_year)
 
     return {
         "trade_count":     len(profits),
@@ -46,6 +56,40 @@ def compute_metrics(trades: List[Trade]) -> dict:
         "max_dd_pts":      round(max_dd, 3),
         "total_profit_pts":round(sum(profits), 3),
         "sharpe":          round(sharpe, 3),
+    }
+
+
+def compute_r_metrics(trades: List[Trade]) -> dict:
+    """
+    Scale-free R-multiple metrics for cross-symbol ranking.
+    1R = distance from entry to initial SL.
+    """
+    r_multiples = []
+    for t in trades:
+        if t.profit_pts is None:
+            continue
+        risk = abs(t.entry_price - t.sl)
+        if risk <= 0:
+            continue
+        r_multiples.append(t.profit_pts / risk)
+
+    if not r_multiples:
+        return {}
+
+    wins_r = [r for r in r_multiples if r > 0]
+    losses_r = [r for r in r_multiples if r <= 0]
+
+    # Max drawdown in R
+    cum_r = np.cumsum(r_multiples)
+    peak_r = np.maximum.accumulate(cum_r)
+    max_dd_r = float(np.max(peak_r - cum_r)) if len(cum_r) > 0 else 0.0
+
+    return {
+        "expectancy_R":  round(float(np.mean(r_multiples)), 3),
+        "avg_win_R":     round(float(np.mean(wins_r)), 3) if wins_r else 0.0,
+        "avg_loss_R":    round(float(np.mean(losses_r)), 3) if losses_r else 0.0,
+        "max_dd_R":      round(max_dd_r, 3),
+        "total_R":       round(float(np.sum(r_multiples)), 3),
     }
 
 

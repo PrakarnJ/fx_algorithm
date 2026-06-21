@@ -178,7 +178,8 @@ import json as _json, os as _os
 _REGIME_OVERRIDE = _os.path.join(_os.path.dirname(__file__), "data", "regime_params.json")
 if _os.path.exists(_REGIME_OVERRIDE):
     try:
-        REGIME_PARAMS = RegimeSwitchParams(**_json.load(open(_REGIME_OVERRIDE)))
+        _d = _json.load(open(_REGIME_OVERRIDE))
+        REGIME_PARAMS = RegimeSwitchParams(**{k: v for k, v in _d.items() if not k.startswith("_")})
     except Exception as _e:
         print(f"[config] ignoring bad regime_params.json: {_e}")
 # Final winning configuration — all 4 enhancements from iterate.py

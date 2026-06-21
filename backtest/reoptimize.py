@@ -210,7 +210,12 @@ def apply_proposal() -> dict:
         raise SystemExit("No proposal found — run re-optimization first.")
     proposal = json.loads(PROPOSAL.read_text())
     DATA_DIR.mkdir(exist_ok=True)
-    OVERRIDE.write_text(json.dumps(proposal["new_params"], indent=1))
+    payload = {
+        **proposal["new_params"],
+        "_last_updated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "_source": "reoptimize",
+    }
+    OVERRIDE.write_text(json.dumps(payload, indent=1))
     print(f"Applied → {OVERRIDE}")
     print("The bot now uses these params (config.py reads the override). Restart bot.py to pick up.")
     return proposal["new_params"]
