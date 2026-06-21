@@ -11,8 +11,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from typing import Optional
 from config import SharedParams, TrendFollowingParams, LondonBreakoutParams
-from strategies.trend_following import TrendFollowingStrategy
-from strategies.london_breakout import LondonBreakoutStrategy
+from algorithms.trend_following import TrendFollowingStrategy
+from algorithms.london_breakout import LondonBreakoutStrategy
 from backtest.engine import load_data, run_backtest_fast as run_backtest
 from backtest.metrics import compute_metrics, print_metrics
 

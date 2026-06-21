@@ -21,7 +21,7 @@ import datetime
 from dataclasses import replace
 
 from config import SharedParams, LondonBreakoutParams
-from strategies.london_breakout import LondonBreakoutStrategy
+from algorithms.london_breakout import LondonBreakoutStrategy
 from backtest.engine import load_data, run_backtest_fast
 from backtest.metrics import compute_metrics, print_metrics
 from backtest.walk_forward import OOS_START

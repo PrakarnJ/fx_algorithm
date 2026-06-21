@@ -40,10 +40,10 @@ from config import (
     SharedParams, LondonBreakoutParams,
     MeanReversionParams, RsiFadeParams, MLClassifierParams,
 )
-from strategies.london_breakout import LondonBreakoutStrategy
-from strategies.mean_reversion import MeanReversionStrategy
-from strategies.rsi_fade import RsiFadeStrategy
-from strategies.ml_classifier import MLClassifierStrategy
+from algorithms.london_breakout import LondonBreakoutStrategy
+from algorithms.mean_reversion import MeanReversionStrategy
+from algorithms.rsi_fade import RsiFadeStrategy
+from algorithms.ml_classifier import MLClassifierStrategy
 from backtest.engine import load_data, run_backtest_fast
 from backtest.metrics import compute_metrics
 from backtest.montecarlo import run_monte_carlo, mc_passes_targets

@@ -19,8 +19,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import SharedParams
 from backtest.optimize import optimize_trend, optimize_breakout
 from backtest.walk_forward import run_walk_forward
-from strategies.trend_following import TrendFollowingStrategy
-from strategies.london_breakout import LondonBreakoutStrategy
+from algorithms.trend_following import TrendFollowingStrategy
+from algorithms.london_breakout import LondonBreakoutStrategy
 
 
 def compare() -> None:

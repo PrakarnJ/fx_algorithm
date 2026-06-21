@@ -36,7 +36,7 @@ class MeanReversionStrategy(BaseStrategy):
         sell_mask = z > self.p.z_entry
 
         if self.p.rsi_confirm:
-            r = rsi(close, self.p.rsi_period)
+            r = rsi(bars["close"], self.p.rsi_period)
             buy_mask &= r < self.p.rsi_extreme
             sell_mask &= r > 100 - self.p.rsi_extreme
 

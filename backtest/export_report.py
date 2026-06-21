@@ -24,8 +24,8 @@ from config import (
     SYMBOL, SharedParams, TrendFollowingParams, LondonBreakoutParams,
     BREAKOUT_PARAMS,
 )
-from strategies.trend_following import TrendFollowingStrategy
-from strategies.london_breakout import LondonBreakoutStrategy
+from algorithms.trend_following import TrendFollowingStrategy
+from algorithms.london_breakout import LondonBreakoutStrategy
 from backtest.engine import load_data, run_backtest_fast
 from backtest.metrics import compute_metrics
 from backtest.walk_forward import OOS_START, ACCEPTANCE

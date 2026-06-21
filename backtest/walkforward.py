@@ -32,8 +32,8 @@ import optuna
 from config import (
     SharedParams, TrendBreakoutParams, RegimeSwitchParams,
 )
-from strategies.trend_breakout import TrendBreakoutStrategy
-from strategies.regime_switch import RegimeSwitchStrategy
+from algorithms.trend_breakout import TrendBreakoutStrategy
+from algorithms.regime_switch import RegimeSwitchStrategy
 from backtest.engine import load_data, run_backtest_fast
 from backtest.metrics import compute_metrics
 from backtest.montecarlo import run_monte_carlo
