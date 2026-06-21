@@ -12,7 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from dataclasses import dataclass, field
-from typing import Optional, List
+from typing import Generator, Optional, List
 import pandas as pd
 import numpy as np
 
@@ -116,7 +116,7 @@ def run_backtest_fast(
                     if open_trade.full_close_at_partial:
                         # Scalp mode: close 100% here, treat like TP hit
                         _close_trade(open_trade, open_trade.partial_tp, bar_time, trades,
-                                     force_full=True)
+                                     force_full=True, shared=shared)
                         consec_losses = 0
                         open_trade = None
                         continue
@@ -130,7 +130,7 @@ def run_backtest_fast(
 
             # Time-stop: close at bar close after N hours (open_bars counts exec bars)
             if open_trade.time_stop_hours > 0 and open_trade.open_bars >= open_trade.time_stop_hours * bars_per_hour:
-                _close_trade(open_trade, close, bar_time, trades)
+                _close_trade(open_trade, close, bar_time, trades, shared=shared)
                 consec_losses = consec_losses + 1 if open_trade.profit_pts < 0 else 0
                 open_trade = None
                 continue
@@ -146,11 +146,11 @@ def run_backtest_fast(
             )
 
             if hit_sl:
-                _close_trade(open_trade, open_trade.sl, bar_time, trades)
+                _close_trade(open_trade, open_trade.sl, bar_time, trades, shared=shared, is_sl_hit=True)
                 consec_losses = consec_losses + 1 if open_trade.profit_pts < 0 else 0
                 open_trade = None
             elif hit_tp:
-                _close_trade(open_trade, open_trade.tp, bar_time, trades)
+                _close_trade(open_trade, open_trade.tp, bar_time, trades, shared=shared)
                 consec_losses = 0
                 open_trade = None
             continue
@@ -190,7 +190,7 @@ def run_backtest_fast(
         )
 
     if open_trade is not None:
-        _close_trade(open_trade, bars.iloc[-1]["close"], bars.index[-1], trades)
+        _close_trade(open_trade, bars.iloc[-1]["close"], bars.index[-1], trades, shared=shared)
 
     return trades
 
@@ -201,7 +201,13 @@ def _close_trade(
     exit_time: pd.Timestamp,
     trades: list,
     force_full: bool = False,
+    shared: Optional[SharedParams] = None,
+    is_sl_hit: bool = False,
 ) -> None:
+    if is_sl_hit and shared is not None and shared.slippage_pts > 0:
+        slip = shared.slippage_pts * 0.01
+        exit_price = (exit_price - slip if trade.direction == "buy" else exit_price + slip)
+
     trade.exit_price = exit_price
     trade.exit_time  = exit_time
     raw = (
@@ -209,11 +215,14 @@ def _close_trade(
         if trade.direction == "buy"
         else trade.entry_price - exit_price
     )
-    if force_full or not trade.partial_done:
-        trade.profit_pts = raw
-    else:
-        # 50% already closed at partial_tp; 50% closing now
-        trade.profit_pts = trade.partial_profit + 0.5 * raw
+    profit = raw if (force_full or not trade.partial_done) else trade.partial_profit + 0.5 * raw
+
+    if shared is not None:
+        profit -= shared.commission_pts * 0.01
+        nights = max(0, (exit_time - trade.entry_time).days)
+        profit -= shared.swap_pts_per_night * 0.01 * nights
+
+    trade.profit_pts = profit
     trades.append(trade)
 
 
@@ -247,11 +256,11 @@ def run_backtest(
             hit_tp = (open_trade.direction == "buy"  and high >= open_trade.tp) or \
                      (open_trade.direction == "sell" and low  <= open_trade.tp)
             if hit_sl:
-                _close_trade(open_trade, open_trade.sl, bar_time, trades)
+                _close_trade(open_trade, open_trade.sl, bar_time, trades, shared=shared, is_sl_hit=True)
                 consec_losses = consec_losses + 1 if open_trade.profit_pts < 0 else 0
                 open_trade = None
             elif hit_tp:
-                _close_trade(open_trade, open_trade.tp, bar_time, trades)
+                _close_trade(open_trade, open_trade.tp, bar_time, trades, shared=shared)
                 consec_losses = 0
                 open_trade = None
             continue
@@ -279,5 +288,137 @@ def run_backtest(
         )
 
     if open_trade is not None:
-        _close_trade(open_trade, h1.iloc[-1]["close"], h1.index[-1], trades)
+        _close_trade(open_trade, h1.iloc[-1]["close"], h1.index[-1], trades, shared=shared)
     return trades
+
+
+# ── Replay engine (bar-by-bar generator for the chart player UI) ──────────────
+
+@dataclass
+class ReplayFrame:
+    bar_index: int
+    bar_time: pd.Timestamp
+    bar: dict                       # {"open", "high", "low", "close"}
+    signal: Optional[object]        # Signal dataclass or None
+    open_trade_before: Optional[Trade]  # snapshot of trade state entering this bar
+    trade_closed: Optional[Trade]   # trade that closed this bar, or None
+    indicator_snapshot: dict        # from strategy.get_indicators()
+
+
+def replay_iter(
+    strategy,
+    shared: SharedParams,
+    dfs: dict,
+    exec_tf: str = "H1",
+    spread_points: int = SPREAD_POINTS,
+) -> Generator[ReplayFrame, None, None]:
+    """
+    Generator version of run_backtest (slow rolling path).
+    Yields one ReplayFrame per bar starting after warmup.
+    Caller (ReplaySession) collects frames into a list for O(1) seek.
+    """
+    exec_bars = dfs[exec_tf]
+    spread = spread_points * 0.01
+    warmup = 250
+    open_trade: Optional[Trade] = None
+    consec_losses = 0
+    pause_until: Optional[pd.Timestamp] = None
+
+    # Window sizes for rolling slice — enough for all indicator lookbacks
+    _slice_sizes = {"M15": 600, "M30": 400, "H1": 500, "H4": 300, "D1": 150,
+                    "W1": 100, "MN": 60, "M5": 1000, "M1": 2000}
+
+    def _build_slice(bar_time: pd.Timestamp) -> dict:
+        slices = {}
+        for key, df in dfs.items():
+            n = _slice_sizes.get(key, 400)
+            slices[key] = df.loc[df.index <= bar_time].iloc[-n:]
+        return slices
+
+    total = len(exec_bars) - warmup
+
+    for i in range(warmup, len(exec_bars)):
+        bar_time = exec_bars.index[i]
+        bar = exec_bars.iloc[i]
+        high, low, close = bar["high"], bar["low"], bar["close"]
+        bar_dict = {"open": float(bar["open"]), "high": float(high),
+                    "low": float(low), "close": float(close)}
+
+        # Snapshot of trade entering this bar (before management)
+        trade_before = None
+        if open_trade is not None:
+            from copy import copy
+            trade_before = copy(open_trade)
+
+        trade_closed: Optional[Trade] = None
+        signal = None
+
+        if open_trade is not None:
+            open_trade.open_bars += 1
+            open_trade.sl = update_sl(
+                open_trade.direction, open_trade.entry_price,
+                open_trade.sl, open_trade.atr, close, shared,
+            )
+            hit_sl = (open_trade.direction == "buy"  and low  <= open_trade.sl) or \
+                     (open_trade.direction == "sell" and high >= open_trade.sl)
+            hit_tp = (open_trade.direction == "buy"  and high >= open_trade.tp) or \
+                     (open_trade.direction == "sell" and low  <= open_trade.tp)
+            if hit_sl:
+                _close_trade(open_trade, open_trade.sl, bar_time, [], shared=shared, is_sl_hit=True)
+                consec_losses = consec_losses + 1 if open_trade.profit_pts < 0 else 0
+                trade_closed = open_trade
+                open_trade = None
+            elif hit_tp:
+                _close_trade(open_trade, open_trade.tp, bar_time, [], shared=shared)
+                consec_losses = 0
+                trade_closed = open_trade
+                open_trade = None
+        else:
+            if not (pause_until is not None and bar_time < pause_until):
+                if consec_losses >= shared.max_consec_losses:
+                    pause_until = bar_time + pd.Timedelta(hours=shared.consec_loss_pause_hours)
+                    consec_losses = 0
+                else:
+                    slice_dfs = _build_slice(bar_time)
+                    signal = strategy.get_signal(slice_dfs)
+                    if signal is not None:
+                        entry = (signal.entry_price + spread if signal.direction == "buy"
+                                 else signal.entry_price - spread)
+                        open_trade = Trade(
+                            entry_time=bar_time, direction=signal.direction,
+                            entry_price=entry, sl=signal.sl, tp=signal.tp, atr=signal.atr,
+                        )
+
+        # Indicator snapshot (optional — strategies may override get_indicators)
+        try:
+            slice_dfs = _build_slice(bar_time)
+            indicator_snapshot = strategy.get_indicators(slice_dfs)
+        except Exception:
+            indicator_snapshot = {}
+
+        yield ReplayFrame(
+            bar_index=i - warmup,
+            bar_time=bar_time,
+            bar=bar_dict,
+            signal=signal,
+            open_trade_before=trade_before,
+            trade_closed=trade_closed,
+            indicator_snapshot=indicator_snapshot,
+        )
+
+    # Force-close any remaining open trade at last bar
+    if open_trade is not None:
+        last_close = float(exec_bars.iloc[-1]["close"])
+        _close_trade(open_trade, last_close, exec_bars.index[-1], [], shared=shared)
+        trade_before = None
+        from copy import copy
+        trade_before = copy(open_trade)
+        yield ReplayFrame(
+            bar_index=len(exec_bars) - 1 - warmup,
+            bar_time=exec_bars.index[-1],
+            bar={"open": last_close, "high": last_close, "low": last_close, "close": last_close},
+            signal=None,
+            open_trade_before=trade_before,
+            trade_closed=open_trade,
+            indicator_snapshot={},
+        )

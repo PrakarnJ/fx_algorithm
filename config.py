@@ -1,4 +1,10 @@
 from dataclasses import dataclass
+from pathlib import Path
+
+ROOT_DIR = Path(__file__).parent
+STOCKS_DIR = ROOT_DIR / "stocks"
+LOGS_DIR = ROOT_DIR / "logs"
+FRONTEND_DIST = ROOT_DIR / "frontend" / "dist"
 
 SYMBOL = "XAUUSD"
 MAGIC = 20240101
@@ -24,6 +30,10 @@ class SharedParams:
     breakeven_atr_mult: float = 1.0          # move SL to BE when profit >= 1x ATR
     trail_atr_mult: float = 1.5              # trail SL at 1.5x ATR behind price
     trail_after_partial_atr_mult: float = 0.75  # tighter trail on remainder after partial TP
+    # Transaction costs (price points; 1 pt = 0.01 in price = $1/lot on XAUUSD)
+    commission_pts: float = 0.0      # round-trip commission per trade
+    swap_pts_per_night: float = 0.0  # overnight rollover cost per calendar night held
+    slippage_pts: float = 0.0        # extra fill slippage when SL is hit
 
 
 @dataclass
