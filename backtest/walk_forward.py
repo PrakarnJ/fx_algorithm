@@ -10,12 +10,16 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from datetime import date, timedelta
 from typing import Tuple
 from config import SharedParams
 from backtest.engine import load_data, run_backtest_fast as run_backtest
 from backtest.metrics import compute_metrics, print_metrics
 
-OOS_START = "2025-01-01"
+# 12 months ago, floored at 2025-01-01 (earliest date with real OOS data).
+# Recomputed each time the module is imported so the window stays current.
+_twelve_months_ago = date.today() - timedelta(days=365)
+OOS_START = max(_twelve_months_ago, date(2025, 1, 1)).strftime("%Y-%m-%d")
 
 ACCEPTANCE = {
     "profit_factor_min": 1.3,
