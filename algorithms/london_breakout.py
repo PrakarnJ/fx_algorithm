@@ -19,6 +19,14 @@ class LondonBreakoutStrategy(BaseStrategy):
         self.shared = shared
         self._today_traded: Optional[date] = None
 
+    def _add_h1_indicators(self, h1: pd.DataFrame) -> None:
+        h1["atr_val"] = atr(h1["high"], h1["low"], h1["close"], self.p.atr_period)
+        if self.p.adx_min > 0:
+            h1["adx_val"] = adx(h1["high"], h1["low"], h1["close"], 14)
+        if self.p.trend_filter:
+            h1["ema_trend"] = ema(h1["close"], 50)
+            h1["bullish"]   = h1["close"] > h1["ema_trend"]
+
     # ── Vectorized path (backtest) ────────────────────────────────────────
     def generate_signals(self, dfs: dict) -> pd.DataFrame:
         """
@@ -28,19 +36,14 @@ class LondonBreakoutStrategy(BaseStrategy):
         """
         m15 = dfs["M15"]
         h1  = dfs["H1"].copy()
-        h1["atr_val"] = atr(h1["high"], h1["low"], h1["close"], self.p.atr_period)
+        self._add_h1_indicators(h1)
 
-        # Optional filters pre-computed on H1
-        if self.p.trend_filter:
-            h1["ema_trend"] = ema(h1["close"], 50)
-            h1["bullish"]   = h1["close"] > h1["ema_trend"]
-            bullish_h1 = h1["bullish"].reindex(m15.index, method="ffill").fillna(True)
-
-        if self.p.adx_min > 0:
-            h1["adx_val"] = adx(h1["high"], h1["low"], h1["close"], 14)
-            adx_m15 = h1["adx_val"].reindex(m15.index, method="ffill")
-
+        # Reindex H1 indicators onto M15 index (no look-ahead ffill)
         atr_m15 = h1["atr_val"].reindex(m15.index, method="ffill")
+        if self.p.trend_filter:
+            bullish_h1 = h1["bullish"].reindex(m15.index, method="ffill").fillna(True)
+        if self.p.adx_min > 0:
+            adx_m15 = h1["adx_val"].reindex(m15.index, method="ffill")
 
         rows = []
         for day, day_bars in m15.groupby(m15.index.date):
@@ -159,8 +162,8 @@ class LondonBreakoutStrategy(BaseStrategy):
         range_low    = asian["low"].min()
         range_height = range_high - range_low
 
-        h1["atr_val"] = atr(h1["high"], h1["low"], h1["close"], self.p.atr_period)
-        atr_val = h1["atr_val"].iloc[-1]
+        self._add_h1_indicators(h1)
+        atr_val = float(h1["atr_val"].iloc[-1])
         if pd.isna(atr_val) or atr_val == 0:
             return None
 
@@ -169,14 +172,11 @@ class LondonBreakoutStrategy(BaseStrategy):
         if range_height < self.p.range_min_atr_mult * atr_val:
             return None
 
-        if self.p.adx_min > 0:
-            h1["adx_val"] = adx(h1["high"], h1["low"], h1["close"], 14)
-            if h1["adx_val"].iloc[-1] < self.p.adx_min:
-                return None
+        if self.p.adx_min > 0 and float(h1["adx_val"].iloc[-1]) < self.p.adx_min:
+            return None
 
         if self.p.trend_filter:
-            h1["ema_trend"] = ema(h1["close"], 50)
-            bullish = h1["close"].iloc[-1] > h1["ema_trend"].iloc[-1]
+            bullish = float(h1["close"].iloc[-1]) > float(h1["ema_trend"].iloc[-1])
         else:
             bullish = None  # no filter
 
@@ -206,8 +206,9 @@ class LondonBreakoutStrategy(BaseStrategy):
         h1 = dfs.get("H1")
         if m15 is None or h1 is None or len(h1) < self.p.atr_period:
             return {}
-        atr_val = round(float(atr(h1["high"], h1["low"], h1["close"], self.p.atr_period).iloc[-1]), 4)
-        result: dict = {"atr": atr_val}
+        h1 = h1.copy()
+        self._add_h1_indicators(h1)
+        result: dict = {"atr": round(float(h1["atr_val"].iloc[-1]), 4)}
         today = m15.index[-1].date()
         asian = m15[
             (m15.index.date == today)
@@ -218,7 +219,7 @@ class LondonBreakoutStrategy(BaseStrategy):
             result["range_high"] = round(float(asian["high"].max()), 4)
             result["range_low"]  = round(float(asian["low"].min()), 4)
         if self.p.adx_min > 0:
-            result["adx"] = round(float(adx(h1["high"], h1["low"], h1["close"], 14).iloc[-1]), 2)
+            result["adx"] = round(float(h1["adx_val"].iloc[-1]), 2)
         if self.p.trend_filter:
-            result["ema_trend"] = round(float(ema(h1["close"], 50).iloc[-1]), 4)
+            result["ema_trend"] = round(float(h1["ema_trend"].iloc[-1]), 4)
         return result

@@ -30,10 +30,13 @@ class TrendBreakoutStrategy(BaseStrategy):
         self.exec_tf = params.tf
         self._last_signal_bar: Optional[pd.Timestamp] = None
 
+    def _atr_series(self, bars: pd.DataFrame) -> pd.Series:
+        return atr(bars["high"], bars["low"], bars["close"], self.p.atr_period)
+
     # ── entry masks ────────────────────────────────────────────────────────
     def _entry(self, dfs: dict, bars: pd.DataFrame):
         close = bars["close"]
-        atr_val = atr(bars["high"], bars["low"], close, self.p.atr_period)
+        atr_val = self._atr_series(bars)
 
         if self.p.mode == "donchian":
             n = self.p.channel_period
@@ -130,7 +133,7 @@ class TrendBreakoutStrategy(BaseStrategy):
         if bars is None or len(bars) < self.p.channel_period + 5:
             return {}
         result: dict = {
-            "atr": round(float(atr(bars["high"], bars["low"], bars["close"], self.p.atr_period).iloc[-1]), 4),
+            "atr": round(float(self._atr_series(bars).iloc[-1]), 4),
         }
         if self.p.mode == "donchian":
             result["donchian_high"] = round(float(bars["high"].rolling(self.p.channel_period).max().iloc[-1]), 4)

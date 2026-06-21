@@ -21,9 +21,12 @@ class RsiFadeStrategy(BaseStrategy):
         self.exec_tf = params.tf
         self._last_signal_bar: Optional[pd.Timestamp] = None
 
+    def _rsi_series(self, bars: pd.DataFrame) -> pd.Series:
+        return rsi(bars["close"], self.p.rsi_period)
+
     def _masks(self, dfs: dict, bars: pd.DataFrame):
         close = bars["close"]
-        r = rsi(close, self.p.rsi_period)
+        r = self._rsi_series(bars)
         buy_mask = r < self.p.buy_below
         sell_mask = r > self.p.sell_above
 
@@ -117,7 +120,7 @@ class RsiFadeStrategy(BaseStrategy):
         bars = dfs.get(self.p.tf)
         if bars is None or len(bars) < self.p.rsi_period + 5:
             return {}
-        result = {"rsi": round(float(rsi(bars["close"], self.p.rsi_period).iloc[-1]), 2)}
+        result = {"rsi": round(float(self._rsi_series(bars).iloc[-1]), 2)}
         if self.p.trend_gate:
             h1 = dfs.get("H1")
             if h1 is not None and len(h1) >= 50:

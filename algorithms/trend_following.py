@@ -18,6 +18,14 @@ class TrendFollowingStrategy(BaseStrategy):
         self.shared = shared
         self._last_signal_bar: Optional[pd.Timestamp] = None
 
+    def _add_indicators(self, h1: pd.DataFrame, h4: "pd.DataFrame | None") -> None:
+        h1["ema_fast"] = ema(h1["close"], self.p.ema_fast)
+        h1["ema_slow"] = ema(h1["close"], self.p.ema_slow)
+        h1["rsi"]      = rsi(h1["close"], self.p.rsi_period)
+        h1["atr"]      = atr(h1["high"], h1["low"], h1["close"], self.p.atr_period)
+        if h4 is not None:
+            h4["ema_trend"] = ema(h4["close"], self.p.ema_trend)
+
     def generate_signals(self, dfs: dict) -> pd.DataFrame:
         """
         Pre-compute all signals at once (vectorized).
@@ -27,12 +35,8 @@ class TrendFollowingStrategy(BaseStrategy):
         h1 = dfs["H1"].copy()
         h4 = dfs["H4"].copy()
 
-        h1["ema_fast"] = ema(h1["close"], self.p.ema_fast)
-        h1["ema_slow"] = ema(h1["close"], self.p.ema_slow)
-        h1["rsi"]      = rsi(h1["close"], self.p.rsi_period)
-        h1["atr"]      = atr(h1["high"], h1["low"], h1["close"], self.p.atr_period)
+        self._add_indicators(h1, h4)
 
-        h4["ema_trend"] = ema(h4["close"], self.p.ema_trend)
         # Forward-fill H4 values into H1 index (no look-ahead)
         h4_close_h1 = h4["close"].reindex(h1.index, method="ffill")
         h4_trend_h1 = h4["ema_trend"].reindex(h1.index, method="ffill")
@@ -80,12 +84,7 @@ class TrendFollowingStrategy(BaseStrategy):
         if len(h1) < self.p.ema_slow + 10 or len(h4) < self.p.ema_trend + 10:
             return None
 
-        # Indicators
-        h1["ema_fast"] = ema(h1["close"], self.p.ema_fast)
-        h1["ema_slow"] = ema(h1["close"], self.p.ema_slow)
-        h1["rsi"] = rsi(h1["close"], self.p.rsi_period)
-        h1["atr"] = atr(h1["high"], h1["low"], h1["close"], self.p.atr_period)
-        h4["ema_trend"] = ema(h4["close"], self.p.ema_trend)
+        self._add_indicators(h1, h4)
 
         current_bar = h1.index[-1]
 
@@ -136,15 +135,17 @@ class TrendFollowingStrategy(BaseStrategy):
         h4 = dfs.get("H4")
         if h1 is None or len(h1) < self.p.ema_slow:
             return {}
-        close_h1 = h1["close"]
+        h1 = h1.copy()
+        h4 = h4.copy() if h4 is not None else None
+        self._add_indicators(h1, h4)
         result = {
-            "ema_fast": round(float(ema(close_h1, self.p.ema_fast).iloc[-1]), 4),
-            "ema_slow": round(float(ema(close_h1, self.p.ema_slow).iloc[-1]), 4),
-            "rsi":      round(float(rsi(close_h1, self.p.rsi_period).iloc[-1]), 2),
-            "atr":      round(float(atr(h1["high"], h1["low"], close_h1, self.p.atr_period).iloc[-1]), 4),
+            "ema_fast": round(float(h1["ema_fast"].iloc[-1]), 4),
+            "ema_slow": round(float(h1["ema_slow"].iloc[-1]), 4),
+            "rsi":      round(float(h1["rsi"].iloc[-1]), 2),
+            "atr":      round(float(h1["atr"].iloc[-1]), 4),
         }
         if h4 is not None and len(h4) >= self.p.ema_trend:
-            trend = float(ema(h4["close"], self.p.ema_trend).iloc[-1])
+            trend = float(h4["ema_trend"].iloc[-1])
             result["ema_trend_h4"] = round(trend, 4)
             result["h4_bullish"] = int(float(h4["close"].iloc[-1]) > trend)
         return result

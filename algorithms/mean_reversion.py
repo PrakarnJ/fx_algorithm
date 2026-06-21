@@ -23,11 +23,14 @@ class MeanReversionStrategy(BaseStrategy):
         self._last_signal_bar: Optional[pd.Timestamp] = None
 
     # ── shared condition logic ────────────────────────────────────────────
-    def _masks(self, bars: pd.DataFrame):
+    def _z_stats(self, bars: pd.DataFrame):
         close = bars["close"]
         mean = close.rolling(self.p.z_lookback).mean()
         std = close.rolling(self.p.z_lookback).std().replace(0, np.nan)
-        z = (close - mean) / std
+        return (close - mean) / std, mean
+
+    def _masks(self, bars: pd.DataFrame):
+        z, _ = self._z_stats(bars)
 
         buy_mask = z < -self.p.z_entry
         sell_mask = z > self.p.z_entry
@@ -125,13 +128,13 @@ class MeanReversionStrategy(BaseStrategy):
         bars = dfs.get(self.p.tf)
         if bars is None or len(bars) < self.p.z_lookback:
             return {}
-        close = bars["close"]
-        mean = close.rolling(self.p.z_lookback).mean().iloc[-1]
-        std  = close.rolling(self.p.z_lookback).std().iloc[-1]
-        z = float((close.iloc[-1] - mean) / std) if std and std > 0 else 0.0
-        result = {"z_score": round(z, 3), "rolling_mean": round(float(mean), 4)}
+        z_series, mean_series = self._z_stats(bars)
+        z_val = float(z_series.iloc[-1])
+        if pd.isna(z_val):
+            z_val = 0.0
+        result = {"z_score": round(z_val, 3), "rolling_mean": round(float(mean_series.iloc[-1]), 4)}
         if self.p.rsi_confirm:
-            result["rsi"] = round(float(rsi(close, self.p.rsi_period).iloc[-1]), 2)
+            result["rsi"] = round(float(rsi(bars["close"], self.p.rsi_period).iloc[-1]), 2)
         if self.p.manage_trail:
             h1 = dfs.get("H1")
             if h1 is not None:
