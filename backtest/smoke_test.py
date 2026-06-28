@@ -139,19 +139,21 @@ def main() -> None:
     dfs = {k: v[v.index <= "2023-06-30"] for k, v in dfs_full.items()}
 
     print("── 1+2+3. Strategy checks ─────────────────────────")
-    mr_params = MeanReversionParams(z_lookback=40, z_entry=1.5, tp_pts=3, sl_pts=9)
+    mr_params = MeanReversionParams(z_lookback=40, z_entry=1.5, sl_atr_mult=0.8, tp_atr_mult=2.0)
     mr = MeanReversionStrategy(mr_params, SHARED)
     signal_sanity("mean_reversion", mr, dfs)
     prefix_test("mean_reversion", mr, dfs)
     parity_test("mean_reversion", MeanReversionStrategy, mr_params, dfs)
 
-    rf_params = RsiFadeParams(rsi_period=2, buy_below=15, sell_above=85, tp_pts=3, sl_pts=9)
+    rf_params = RsiFadeParams(rsi_period=2, buy_below=15, sell_above=85, sl_atr_mult=0.8, tp_atr_mult=2.0)
     rf = RsiFadeStrategy(rf_params, SHARED)
     signal_sanity("rsi_fade", rf, dfs)
     prefix_test("rsi_fade", rf, dfs)
     parity_test("rsi_fade", RsiFadeStrategy, rf_params, dfs)
 
-    ml_params = MLClassifierParams(threshold=0.6, max_iter=60, horizon_bars=16)
+    # Use a low threshold so the smoke test gets signals for structural checks;
+    # the real threshold (0.6) is conservative and only useful on large datasets.
+    ml_params = MLClassifierParams(threshold=0.1, max_iter=60, horizon_bars=16, tp_pts=4.0, sl_pts=1.5)
     ml = MLClassifierStrategy(ml_params, SHARED)
     dfs_fit = {k: v[v.index <= "2022-09-30"] for k, v in dfs.items()}
     ml.fit(dfs_fit)

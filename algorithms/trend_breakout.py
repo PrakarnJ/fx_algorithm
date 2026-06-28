@@ -85,15 +85,19 @@ class TrendBreakoutStrategy(BaseStrategy):
             last_i = i
             entry = closes[i]
             if long_arr[i]:
+                sl_p = entry - self.p.sl_atr_mult * a
+                risk = entry - sl_p
+                partial_tp = (entry + self.p.partial_tp_r * risk) if self.p.partial_tp_enabled else float("nan")
                 rows.append(dict(time=bars.index[i], direction="buy", entry=entry,
-                                 sl=entry - self.p.sl_atr_mult * a,
-                                 tp=entry + self.FAR_TP, atr=a))
+                                 sl=sl_p, tp=entry + self.FAR_TP, atr=a, partial_tp=partial_tp))
             else:
+                sl_p = entry + self.p.sl_atr_mult * a
+                risk = sl_p - entry
+                partial_tp = (entry - self.p.partial_tp_r * risk) if self.p.partial_tp_enabled else float("nan")
                 rows.append(dict(time=bars.index[i], direction="sell", entry=entry,
-                                 sl=entry + self.p.sl_atr_mult * a,
-                                 tp=entry - self.FAR_TP, atr=a))
+                                 sl=sl_p, tp=entry - self.FAR_TP, atr=a, partial_tp=partial_tp))
 
-        cols = ["direction", "entry", "sl", "tp", "atr"]
+        cols = ["direction", "entry", "sl", "tp", "atr", "partial_tp"]
         if not rows:
             return pd.DataFrame(columns=cols)
         return pd.DataFrame(rows).set_index("time")[cols]
@@ -120,11 +124,15 @@ class TrendBreakoutStrategy(BaseStrategy):
 
         entry = float(bars["close"].iloc[-1])
         if is_long:
-            sig = Signal("buy", entry, entry - self.p.sl_atr_mult * a,
-                         entry + self.FAR_TP, a, current_bar)
+            sl = entry - self.p.sl_atr_mult * a
+            risk = entry - sl
+            partial_tp = (entry + self.p.partial_tp_r * risk) if self.p.partial_tp_enabled else None
+            sig = Signal("buy", entry, sl, entry + self.FAR_TP, a, current_bar, partial_tp=partial_tp)
         else:
-            sig = Signal("sell", entry, entry + self.p.sl_atr_mult * a,
-                         entry - self.FAR_TP, a, current_bar)
+            sl = entry + self.p.sl_atr_mult * a
+            risk = sl - entry
+            partial_tp = (entry - self.p.partial_tp_r * risk) if self.p.partial_tp_enabled else None
+            sig = Signal("sell", entry, sl, entry - self.FAR_TP, a, current_bar, partial_tp=partial_tp)
         self._last_signal_bar = current_bar
         return sig
 

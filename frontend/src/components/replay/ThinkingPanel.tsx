@@ -1,7 +1,7 @@
 import React from 'react'
 import type { ReplayFrame } from '@/lib/api'
 import type { SessionSummary } from './ChartPlayer'
-import { formatPrice, formatPts } from '@/lib/formatters'
+import { formatPrice, formatPips } from '@/lib/formatters'
 
 interface ThinkingPanelProps {
   frame: ReplayFrame | null
@@ -33,7 +33,7 @@ export function ThinkingPanel({ frame, summary }: ThinkingPanelProps) {
         <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
           <span className="text-muted-foreground">P&amp;L</span>
           <span className={summary.totalPts >= 0 ? 'text-buy' : 'text-sell'}>
-            {formatPts(summary.totalPts)} pts
+            {formatPips(summary.totalPts)} pips
           </span>
           <span className="text-muted-foreground">Trades</span>
           <span className="text-foreground">{totalTrades}</span>
@@ -69,23 +69,72 @@ export function ThinkingPanel({ frame, summary }: ThinkingPanelProps) {
       </div>
 
       {/* Indicator snapshot */}
-      {Object.keys(indicator_snapshot).length > 0 && (
-        <div>
-          <div className="text-muted-foreground uppercase tracking-wider text-xs mb-1">
-            Indicators
+      {Object.keys(indicator_snapshot).length > 0 && (() => {
+        const sk = typeof indicator_snapshot.stochrsi_k === 'number' ? indicator_snapshot.stochrsi_k : null
+        const sd = typeof indicator_snapshot.stochrsi_d === 'number' ? indicator_snapshot.stochrsi_d : null
+        const skPct = sk !== null ? Math.min(100, Math.max(0, sk)) : null
+        const displayEntries = Object.entries(indicator_snapshot).filter(
+          ([k]) => !['stochrsi_k', 'stochrsi_d', 'sr_levels'].includes(k)
+        )
+        return (
+          <div className="space-y-2">
+            {/* StochRSI visual gauge */}
+            {sk !== null && (
+              <div>
+                <div className="text-muted-foreground uppercase tracking-wider text-xs mb-1">
+                  StochRSI
+                </div>
+                <div className="relative h-4 rounded bg-secondary/30 overflow-hidden">
+                  {/* overbought zone */}
+                  <div className="absolute right-0 top-0 h-full bg-sell/15" style={{ width: '30%' }} />
+                  {/* oversold zone */}
+                  <div className="absolute left-0 top-0 h-full bg-buy/15" style={{ width: '30%' }} />
+                  {/* D line marker */}
+                  {sd !== null && (
+                    <div
+                      className="absolute top-0 h-full w-0.5 bg-slate-400/60"
+                      style={{ left: `${Math.min(100, Math.max(0, sd))}%` }}
+                    />
+                  )}
+                  {/* K fill */}
+                  <div
+                    className={`absolute left-0 top-0 h-full transition-all ${
+                      sk > 70 ? 'bg-sell/70' : sk < 30 ? 'bg-buy/70' : 'bg-yellow-400/50'
+                    }`}
+                    style={{ width: `${skPct}%` }}
+                  />
+                </div>
+                <div className="flex justify-between text-xs mt-0.5">
+                  <span className="text-buy">30</span>
+                  <span className={`${sk > 70 ? 'text-sell' : sk < 30 ? 'text-buy' : 'text-foreground'}`}>
+                    K {sk.toFixed(1)}{sd !== null ? ` / D ${sd.toFixed(1)}` : ''}
+                  </span>
+                  <span className="text-sell">70</span>
+                </div>
+              </div>
+            )}
+
+            {/* Remaining numeric indicators */}
+            {displayEntries.length > 0 && (
+              <div>
+                <div className="text-muted-foreground uppercase tracking-wider text-xs mb-1">
+                  Indicators
+                </div>
+                <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
+                  {displayEntries.map(([k, v]) => (
+                    <React.Fragment key={k}>
+                      <span className="text-muted-foreground truncate" title={k}>{k}</span>
+                      <span className="text-foreground">
+                        {typeof v === 'number' ? v.toFixed(4) : String(v)}
+                      </span>
+                    </React.Fragment>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
-          <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
-            {Object.entries(indicator_snapshot).map(([k, v]) => (
-              <React.Fragment key={k}>
-                <span className="text-muted-foreground truncate" title={k}>{k}</span>
-                <span className="text-foreground">
-                  {typeof v === 'number' ? v.toFixed(4) : String(v)}
-                </span>
-              </React.Fragment>
-            ))}
-          </div>
-        </div>
-      )}
+        )
+      })()}
 
       {/* Signal */}
       {signal && (
@@ -134,7 +183,7 @@ export function ThinkingPanel({ frame, summary }: ThinkingPanelProps) {
       {trade_closed && (
         <div
           className={`border rounded p-2 ${
-            trade_closed.profit_pts >= 0
+            trade_closed.profit_pips >= 0
               ? 'border-buy/30 bg-buy/5'
               : 'border-sell/30 bg-sell/5'
           }`}
@@ -144,10 +193,10 @@ export function ThinkingPanel({ frame, summary }: ThinkingPanelProps) {
           </div>
           <div
             className={`text-sm font-bold ${
-              trade_closed.profit_pts >= 0 ? 'text-buy' : 'text-sell'
+              trade_closed.profit_pips >= 0 ? 'text-buy' : 'text-sell'
             }`}
           >
-            TRADE CLOSED: {formatPts(trade_closed.profit_pts)} pts ({trade_closed.outcome})
+            TRADE CLOSED: {formatPips(trade_closed.profit_pips)} pips ({trade_closed.outcome})
           </div>
         </div>
       )}

@@ -60,9 +60,9 @@ def compare() -> None:
         print("  Consider: expanding data range, relaxing parameters, or redesigning.")
         return
 
-    winner_key = max(viable, key=lambda k: viable[k]["metrics"].get("expectancy_pts", 0))
+    winner_key = max(viable, key=lambda k: viable[k]["metrics"].get("expectancy_pips", 0))
     winner = viable[winner_key]
-    exp = winner["metrics"]["expectancy_pts"]
+    exp = winner["metrics"]["expectancy_pips"]
     pf = winner["metrics"]["profit_factor"]
 
     print(f"\n  Recommended: Strategy {winner_key}  ({winner['label']})")

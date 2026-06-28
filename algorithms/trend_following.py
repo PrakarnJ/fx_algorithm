@@ -75,6 +75,15 @@ class TrendFollowingStrategy(BaseStrategy):
         )
         out["sl"] = sl_vals
         out["tp"] = tp_vals
+
+        # Partial TP: close 50% at partial_tp_r × initial risk, trail runner
+        risk = np.abs(out["entry"].values - out["sl"].values)
+        partial_tp_vals = np.where(
+            out["direction"] == "buy",
+            out["entry"].values + self.p.partial_tp_r * risk,
+            out["entry"].values - self.p.partial_tp_r * risk,
+        ) if self.p.partial_tp_enabled else float("nan")
+        out["partial_tp"] = partial_tp_vals
         return out
 
     def get_signal(self, dfs: dict) -> Optional[Signal]:
@@ -119,12 +128,16 @@ class TrendFollowingStrategy(BaseStrategy):
         if crossed_up and bullish_trend and 50 <= rsi_val <= 70:
             sl = entry - self.p.sl_atr_mult * atr_val
             tp = entry + self.p.tp_atr_mult * atr_val
-            signal = Signal("buy", entry, sl, tp, atr_val, current_bar)
+            risk = entry - sl
+            partial_tp = (entry + self.p.partial_tp_r * risk) if self.p.partial_tp_enabled else None
+            signal = Signal("buy", entry, sl, tp, atr_val, current_bar, partial_tp=partial_tp)
 
         elif crossed_down and not bullish_trend and 30 <= rsi_val <= 50:
             sl = entry + self.p.sl_atr_mult * atr_val
             tp = entry - self.p.tp_atr_mult * atr_val
-            signal = Signal("sell", entry, sl, tp, atr_val, current_bar)
+            risk = sl - entry
+            partial_tp = (entry - self.p.partial_tp_r * risk) if self.p.partial_tp_enabled else None
+            signal = Signal("sell", entry, sl, tp, atr_val, current_bar, partial_tp=partial_tp)
 
         if signal:
             self._last_signal_bar = current_bar

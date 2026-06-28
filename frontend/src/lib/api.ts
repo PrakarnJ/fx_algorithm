@@ -30,19 +30,21 @@ export interface Stock {
   spread_points: number
   yfinance_ticker: string
   available_tfs: string[]
+  last_synced: number | null    // Unix timestamp of most recently modified TF file
+  last_data_date: string | null // Latest bar date in the data (YYYY-MM-DD)
 }
 
 export interface BacktestMetrics {
   trade_count: number
   win_rate_pct: number
   profit_factor: number
-  expectancy_pts: number
+  expectancy_pips: number
   expectancy_R: number
-  avg_win_pts: number
-  avg_loss_pts: number
-  max_dd_pts: number
+  avg_win_pips: number
+  avg_loss_pips: number
+  max_dd_pips: number
   max_dd_R: number
-  total_profit_pts: number
+  total_profit_pips: number
   total_R: number
   sharpe: number
 }
@@ -59,11 +61,16 @@ export interface BacktestResult {
 }
 
 export interface Trade {
-  direction: string
+  entry_time: string
+  exit_time: string | null
+  direction: string        // 'buy' | 'sell'
   entry_price: number
-  exit_price: number
-  profit_pts: number
-  bars_held: number
+  exit_price: number | null
+  sl: number               // final SL (may be trailed from initial)
+  initial_sl: number       // SL at entry — use this for risk sizing and display
+  tp: number
+  profit_pips: number | null
+  exit_reason: string      // 'sl' | 'trail' | 'tp' | 'time' | 'eod'
 }
 
 export interface ReplayBar {
@@ -91,7 +98,7 @@ export interface ReplayOpenTrade {
 
 export interface ReplayTradeClosed {
   direction: string
-  profit_pts: number
+  profit_pips: number
   outcome: string
 }
 
@@ -123,6 +130,20 @@ export interface StockTFEntry {
 
 export interface StockTFInfo {
   [tf: string]: StockTFEntry
+}
+
+export interface SyncJobEntry {
+  symbol: string
+  status: 'done' | 'error'
+  bars?: Record<string, number>
+  error?: string
+}
+
+export interface SyncJob {
+  status: 'running' | 'complete'
+  done: number
+  total: number
+  progress: SyncJobEntry[]
 }
 
 export interface OHLCBar {

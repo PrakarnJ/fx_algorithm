@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react'
 import { Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { CandlestickChart } from './CandlestickChart'
+import { StochRsiChart } from './StochRsiChart'
 import { PlaybackControls } from './PlaybackControls'
 import { ThinkingPanel } from './ThinkingPanel'
 import { useReplayWebSocket, type ReplayAction } from '@/hooks/useReplayWebSocket'
@@ -24,8 +25,8 @@ export function ChartPlayer({ sessionId }: ChartPlayerProps) {
   const [barIndex, setBarIndex] = useState(0)
   const [totalBars, setTotalBars] = useState(0)
   const [summary, setSummary] = useState<SessionSummary>({ totalPts: 0, wins: 0, losses: 0 })
+  const [sessionEnded, setSessionEnded] = useState(false)
 
-  // Track which bar indices have already been counted to avoid double-counting on seek/step-back
   const countedTradesRef = useRef<Set<number>>(new Set())
 
   const handleFrame = useCallback((f: ReplayFrame) => {
@@ -34,7 +35,7 @@ export function ChartPlayer({ sessionId }: ChartPlayerProps) {
     setTotalBars(f.total_bars)
     if (f.trade_closed && !countedTradesRef.current.has(f.bar_index)) {
       countedTradesRef.current.add(f.bar_index)
-      const pts = f.trade_closed.profit_pts ?? 0
+      const pts = f.trade_closed.profit_pips ?? 0
       setSummary(prev => ({
         totalPts: prev.totalPts + pts,
         wins: prev.wins + (pts > 0 ? 1 : 0),
@@ -45,15 +46,17 @@ export function ChartPlayer({ sessionId }: ChartPlayerProps) {
 
   const handleDone = useCallback(() => {
     setIsPlaying(false)
+    setSessionEnded(true)
   }, [])
 
-  // Reset playback state whenever a new session is loaded
+  // Reset all state whenever a new session is loaded
   useEffect(() => {
     setFrame(null)
     setIsPlaying(false)
     setBarIndex(0)
     setTotalBars(0)
     setSummary({ totalPts: 0, wins: 0, losses: 0 })
+    setSessionEnded(false)
     countedTradesRef.current = new Set()
   }, [sessionId])
 
@@ -63,7 +66,7 @@ export function ChartPlayer({ sessionId }: ChartPlayerProps) {
     onDone: handleDone,
   })
 
-  // Auto-play as soon as the WebSocket connects — backend starts paused by default
+  // Auto-play as soon as the WebSocket connects
   useEffect(() => {
     if (status === 'open') {
       send({ action: 'play', speed: 1 })
@@ -78,17 +81,20 @@ export function ChartPlayer({ sessionId }: ChartPlayerProps) {
     send(action)
   }
 
+  // "Connection lost" only for genuine errors, not normal session completion
+  const showLostOverlay = sessionId && (status === 'error' || (status === 'closed' && !sessionEnded))
+
   return (
     <div className="flex flex-col h-full relative">
-      {/* Connecting spinner — shown before first frame arrives */}
+      {/* Connecting spinner */}
       {sessionId && status === 'connecting' && !frame && (
         <div className="absolute inset-0 flex items-center justify-center z-10 bg-background/60">
           <Loader2 className="h-8 w-8 animate-spin text-accent" />
         </div>
       )}
 
-      {/* Disconnection overlay — shown when WS is lost after 3 retries */}
-      {sessionId && (status === 'error' || status === 'closed') && (
+      {/* Connection lost — genuine error only (not normal session end) */}
+      {showLostOverlay && (
         <div className="absolute inset-0 bg-background/80 flex items-center justify-center z-10">
           <div className="text-center font-mono space-y-3">
             <div className="text-sell text-sm">⚠ Connection lost</div>
@@ -99,20 +105,30 @@ export function ChartPlayer({ sessionId }: ChartPlayerProps) {
         </div>
       )}
 
+      {/* Replay complete badge — non-blocking, allows timeline seeks */}
+      {sessionEnded && !showLostOverlay && (
+        <div className="absolute top-2 right-2 z-10 px-2 py-1 rounded bg-secondary/80 border border-card-border font-mono text-xs text-muted-foreground">
+          Replay complete — click timeline to review
+        </div>
+      )}
+
       {/* Chart + Thinking panel */}
       <div className="flex flex-1 overflow-hidden" style={{ minHeight: 0 }}>
-        {/* Chart — 70% — key=sessionId forces remount (clears bars) on new session */}
-        <div className="flex-[7] border-r border-card-border" style={{ minWidth: 0 }}>
-          <CandlestickChart key={sessionId ?? ''} frame={frame} containerClassName="w-full h-full" />
+        {/* Left: main candlestick chart (top) + StochRSI mini-chart (bottom) */}
+        <div className="flex-[7] flex flex-col border-r border-card-border" style={{ minWidth: 0 }}>
+          <div className="flex-[4]" style={{ minHeight: 0 }}>
+            <CandlestickChart key={sessionId ?? ''} frame={frame} containerClassName="w-full h-full" />
+          </div>
+          <div className="flex-[1] border-t border-card-border" style={{ minHeight: 0 }}>
+            <StochRsiChart key={sessionId ?? ''} frame={frame} containerClassName="w-full h-full" />
+          </div>
         </div>
-
-        {/* Thinking panel — 30% */}
         <div className="flex-[3] overflow-hidden" style={{ minWidth: 0 }}>
           <ThinkingPanel frame={frame} summary={summary} />
         </div>
       </div>
 
-      {/* Playback controls */}
+      {/* Playback controls — always visible and clickable */}
       <PlaybackControls
         isPlaying={isPlaying}
         barIndex={barIndex}

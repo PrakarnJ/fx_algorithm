@@ -9,11 +9,11 @@ from config import MeanReversionParams, SharedParams
 class MeanReversionStrategy(BaseStrategy):
     """
     Z-score fade: when price stretches z_entry standard deviations from its
-    rolling mean, fade the move back toward the mean with a fixed-point
-    TP/SL scalp. Optional RSI-extreme confirmation and session gate.
+    rolling mean, fade the move back toward the mean.
 
-    With manage_trail=False the signal's atr is emitted as 0, which disables
-    trade_manager.update_sl in the engine — pure fixed SL/TP behaviour.
+    SL/TP are ATR-based (sl_atr_mult / tp_atr_mult) for volatility-adaptive
+    sizing. The signal always carries a real atr so trade_manager.update_sl
+    can trail the position after break-even is reached.
     """
 
     def __init__(self, params: MeanReversionParams, shared: SharedParams):
@@ -63,7 +63,8 @@ class MeanReversionStrategy(BaseStrategy):
         fresh = any_mask & ~any_mask.shift(1, fill_value=False)
         cand_idx = np.flatnonzero(fresh.values)
 
-        atr_series = self._atr_on_bars(dfs, bars) if self.p.manage_trail else None
+        # ATR always needed now for SL/TP sizing
+        atr_series = self._atr_on_bars(dfs, bars)
         closes = bars["close"].values
         buy_arr = buy_mask.values
 
@@ -72,18 +73,23 @@ class MeanReversionStrategy(BaseStrategy):
         for i in cand_idx:
             if i - last_i < self.p.cooldown_bars:
                 continue
+            atr_val = float(atr_series.iloc[i])
+            if pd.isna(atr_val) or atr_val <= 0:
+                continue  # skip bars before ATR warmup
             last_i = i
             entry = closes[i]
             if buy_arr[i]:
-                sl, tp, direction = entry - self.p.sl_pts, entry + self.p.tp_pts, "buy"
+                sl = entry - self.p.sl_atr_mult * atr_val
+                tp = entry + self.p.tp_atr_mult * atr_val
+                direction = "buy"
             else:
-                sl, tp, direction = entry + self.p.sl_pts, entry - self.p.tp_pts, "sell"
-            atr_val = float(atr_series.iloc[i]) if atr_series is not None else 0.0
-            if atr_series is not None and pd.isna(atr_val):
-                atr_val = 0.0
+                sl = entry + self.p.sl_atr_mult * atr_val
+                tp = entry - self.p.tp_atr_mult * atr_val
+                direction = "sell"
             rows.append(dict(
                 time=bars.index[i], direction=direction,
-                entry=entry, sl=sl, tp=tp, atr=atr_val,
+                entry=entry, sl=sl, tp=tp,
+                atr=atr_val if self.p.manage_trail else 0.0,
             ))
 
         cols = ["direction", "entry", "sl", "tp", "atr"]
@@ -110,16 +116,21 @@ class MeanReversionStrategy(BaseStrategy):
             return None
 
         entry = float(bars["close"].iloc[-1])
-        atr_val = 0.0
-        if self.p.manage_trail:
-            atr_val = float(self._atr_on_bars(dfs, bars).iloc[-1] or 0.0)
+        atr_val = float(self._atr_on_bars(dfs, bars).iloc[-1] or 0.0)
+        if atr_val <= 0:
+            return None  # ATR not yet warmed up
 
+        trail_atr = atr_val if self.p.manage_trail else 0.0
         if is_buy:
-            signal = Signal("buy", entry, entry - self.p.sl_pts,
-                            entry + self.p.tp_pts, atr_val, current_bar)
+            signal = Signal("buy", entry,
+                            entry - self.p.sl_atr_mult * atr_val,
+                            entry + self.p.tp_atr_mult * atr_val,
+                            trail_atr, current_bar)
         else:
-            signal = Signal("sell", entry, entry + self.p.sl_pts,
-                            entry - self.p.tp_pts, atr_val, current_bar)
+            signal = Signal("sell", entry,
+                            entry + self.p.sl_atr_mult * atr_val,
+                            entry - self.p.tp_atr_mult * atr_val,
+                            trail_atr, current_bar)
 
         self._last_signal_bar = current_bar
         return signal
@@ -135,8 +146,7 @@ class MeanReversionStrategy(BaseStrategy):
         result = {"z_score": round(z_val, 3), "rolling_mean": round(float(mean_series.iloc[-1]), 4)}
         if self.p.rsi_confirm:
             result["rsi"] = round(float(rsi(bars["close"], self.p.rsi_period).iloc[-1]), 2)
-        if self.p.manage_trail:
-            h1 = dfs.get("H1")
-            if h1 is not None:
-                result["atr"] = round(float(atr(h1["high"], h1["low"], h1["close"], 14).iloc[-1]), 4)
+        h1 = dfs.get("H1")
+        if h1 is not None:
+            result["atr"] = round(float(atr(h1["high"], h1["low"], h1["close"], 14).iloc[-1]), 4)
         return result

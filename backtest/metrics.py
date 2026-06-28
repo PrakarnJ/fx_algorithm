@@ -47,15 +47,15 @@ def compute_metrics(trades: List[Trade]) -> dict:
             sharpe = float(np.mean(profits)) / std * np.sqrt(trades_per_year)
 
     return {
-        "trade_count":     len(profits),
-        "win_rate_%":      round(win_rate * 100, 1),
-        "profit_factor":   round(profit_factor, 3),
-        "expectancy_pts":  round(expectancy, 3),
-        "avg_win_pts":     round(avg_win, 3),
-        "avg_loss_pts":    round(avg_loss, 3),
-        "max_dd_pts":      round(max_dd, 3),
-        "total_profit_pts":round(sum(profits), 3),
-        "sharpe":          round(sharpe, 3),
+        "trade_count":      len(profits),
+        "win_rate_%":       round(win_rate * 100, 1),
+        "profit_factor":    round(profit_factor, 3),
+        "expectancy_pips":  round(expectancy, 3),
+        "avg_win_pips":     round(avg_win, 3),
+        "avg_loss_pips":    round(avg_loss, 3),
+        "max_dd_pips":      round(max_dd, 3),
+        "total_profit_pips":round(sum(profits), 3),
+        "sharpe":           round(sharpe, 3),
     }
 
 

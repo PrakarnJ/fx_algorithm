@@ -8,7 +8,7 @@ export function formatPct(value: number | undefined | null): string {
   return `${value.toFixed(1)}%`
 }
 
-export function formatPts(value: number | undefined | null): string {
+export function formatPips(value: number | undefined | null): string {
   if (value == null || isNaN(value)) return '—'
   const sign = value > 0 ? '+' : ''
   return `${sign}${value.toFixed(1)}`

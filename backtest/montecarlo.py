@@ -73,16 +73,16 @@ def run_monte_carlo(
         "bootstrap": {
             "win_rate_%": bands(boot[:, 0]),
             "profit_factor": bands(boot[:, 1]),
-            "expectancy_pts": bands(boot[:, 2]),
-            "max_dd_pts": bands(boot[:, 3]),
+            "expectancy_pips": bands(boot[:, 2]),
+            "max_dd_pips": bands(boot[:, 3]),
         },
         "skip_10pct": {
             "win_rate_%": bands(skip[:, 0]),
             "profit_factor": bands(skip[:, 1]),
-            "expectancy_pts": bands(skip[:, 2]),
-            "max_dd_pts": bands(skip[:, 3]),
+            "expectancy_pips": bands(skip[:, 2]),
+            "max_dd_pips": bands(skip[:, 3]),
         },
-        "breakeven_extra_slippage_pts": breakeven_slippage,
+        "breakeven_extra_slippage_pips": breakeven_slippage,
     }
 
 
@@ -94,7 +94,7 @@ def mc_passes_targets(mc: dict, wr_min: float, pf_min: float, dd_max: float) -> 
     checks = {
         "wr_p5": b["win_rate_%"]["p5"] >= wr_min,
         "pf_p5": b["profit_factor"]["p5"] >= pf_min,
-        "dd_p95": b["max_dd_pts"]["p95"] < dd_max,
-        "exp_p5_positive": b["expectancy_pts"]["p5"] > 0,
+        "dd_p95": b["max_dd_pips"]["p95"] < dd_max,
+        "exp_p5_positive": b["expectancy_pips"]["p5"] > 0,
     }
     return {"passed": all(checks.values()), "checks": checks}

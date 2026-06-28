@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 import pandas as pd
 
@@ -11,6 +11,7 @@ class Signal:
     tp: float
     atr: float
     bar_time: pd.Timestamp
+    partial_tp: Optional[float] = field(default=None)  # None = disabled
 
     def __post_init__(self):
         if self.direction not in ("buy", "sell"):

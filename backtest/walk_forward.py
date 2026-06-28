@@ -43,7 +43,7 @@ def run_walk_forward(
     passed = (
         metrics.get("trade_count", 0) >= ACCEPTANCE["min_trades"]
         and metrics.get("profit_factor", 0) >= ACCEPTANCE["profit_factor_min"]
-        and metrics.get("expectancy_pts", -1) > ACCEPTANCE["expectancy_min"]
+        and metrics.get("expectancy_pips", -1) > ACCEPTANCE["expectancy_min"]
     )
     label = "✓ PASS" if passed else "✗ FAIL"
     print(f"  Acceptance gate: {label}")

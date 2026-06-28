@@ -9,10 +9,11 @@ from config import RsiFadeParams, SharedParams
 class RsiFadeStrategy(BaseStrategy):
     """
     Short-period RSI extreme fade: buy when RSI(n) collapses below buy_below,
-    sell when it spikes above sell_above. Fixed-point TP/SL scalp.
+    sell when it spikes above sell_above.
 
-    trend_gate=True only takes fades that revert toward the H1 EMA(50):
-    buys only when price is below the EMA (stretched down), sells only above.
+    SL/TP are ATR-based for volatility-adaptive sizing (R:R = 2.5:1).
+    trend_gate=True (default) only fades when H1 EMA(50) agrees with direction
+    — avoids fading into a strong trend.
     """
 
     def __init__(self, params: RsiFadeParams, shared: SharedParams):
@@ -57,7 +58,8 @@ class RsiFadeStrategy(BaseStrategy):
         fresh = any_mask & ~any_mask.shift(1, fill_value=False)
         cand_idx = np.flatnonzero(fresh.values)
 
-        atr_series = self._atr_on_bars(dfs, bars) if self.p.manage_trail else None
+        # ATR always needed for SL/TP sizing
+        atr_series = self._atr_on_bars(dfs, bars)
         closes = bars["close"].values
         buy_arr = buy_mask.values
 
@@ -66,18 +68,23 @@ class RsiFadeStrategy(BaseStrategy):
         for i in cand_idx:
             if i - last_i < self.p.cooldown_bars:
                 continue
+            atr_val = float(atr_series.iloc[i])
+            if pd.isna(atr_val) or atr_val <= 0:
+                continue  # skip bars before ATR warmup
             last_i = i
             entry = closes[i]
             if buy_arr[i]:
-                sl, tp, direction = entry - self.p.sl_pts, entry + self.p.tp_pts, "buy"
+                sl = entry - self.p.sl_atr_mult * atr_val
+                tp = entry + self.p.tp_atr_mult * atr_val
+                direction = "buy"
             else:
-                sl, tp, direction = entry + self.p.sl_pts, entry - self.p.tp_pts, "sell"
-            atr_val = float(atr_series.iloc[i]) if atr_series is not None else 0.0
-            if atr_series is not None and pd.isna(atr_val):
-                atr_val = 0.0
+                sl = entry + self.p.sl_atr_mult * atr_val
+                tp = entry - self.p.tp_atr_mult * atr_val
+                direction = "sell"
             rows.append(dict(
                 time=bars.index[i], direction=direction,
-                entry=entry, sl=sl, tp=tp, atr=atr_val,
+                entry=entry, sl=sl, tp=tp,
+                atr=atr_val if self.p.manage_trail else 0.0,
             ))
 
         cols = ["direction", "entry", "sl", "tp", "atr"]
@@ -102,16 +109,21 @@ class RsiFadeStrategy(BaseStrategy):
             return None
 
         entry = float(bars["close"].iloc[-1])
-        atr_val = 0.0
-        if self.p.manage_trail:
-            atr_val = float(self._atr_on_bars(dfs, bars).iloc[-1] or 0.0)
+        atr_val = float(self._atr_on_bars(dfs, bars).iloc[-1] or 0.0)
+        if atr_val <= 0:
+            return None  # ATR not yet warmed up
 
+        trail_atr = atr_val if self.p.manage_trail else 0.0
         if is_buy:
-            signal = Signal("buy", entry, entry - self.p.sl_pts,
-                            entry + self.p.tp_pts, atr_val, current_bar)
+            signal = Signal("buy", entry,
+                            entry - self.p.sl_atr_mult * atr_val,
+                            entry + self.p.tp_atr_mult * atr_val,
+                            trail_atr, current_bar)
         else:
-            signal = Signal("sell", entry, entry + self.p.sl_pts,
-                            entry - self.p.tp_pts, atr_val, current_bar)
+            signal = Signal("sell", entry,
+                            entry + self.p.sl_atr_mult * atr_val,
+                            entry - self.p.tp_atr_mult * atr_val,
+                            trail_atr, current_bar)
 
         self._last_signal_bar = current_bar
         return signal

@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from algorithms.registry import TF_TO_FILE
 from api.logger import log_event
-from api.schemas import DownloadRequest, SymbolInfo
+from api.schemas import DownloadRequest, SymbolInfo, SyncAllRequest
 from config import STOCKS_DIR
 from data_pipeline.capabilities import available_tfs
 from data_pipeline.downloader import download
@@ -19,12 +19,40 @@ router = APIRouter(tags=["stocks"])
 _download_jobs: dict = {}
 
 
+def _read_last_date_str(path) -> str | None:
+    """Read the last bar's date from a CSV by scanning its final bytes — no full load."""
+    if path is None or not path.exists():
+        return None
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - 256))
+            tail = f.read().decode(errors="ignore")
+        last_line = tail.strip().rsplit("\n", 1)[-1]
+        ts = last_line.split(",")[0].strip()
+        return ts[:10] if len(ts) >= 10 else None
+    except Exception:
+        return None
+
+
 @router.get("/stocks", response_model=list[SymbolInfo])
 def get_stocks():
     symbols = list_symbols()
     result = []
     for sym in symbols:
         meta = get_symbol_meta(sym)
+        sym_dir = STOCKS_DIR / sym
+        last_synced = None
+        newest_path = None
+        for filename in TF_TO_FILE.values():
+            path = sym_dir / filename
+            if path.exists():
+                mtime = path.stat().st_mtime
+                if last_synced is None or mtime > last_synced:
+                    last_synced = mtime
+                    newest_path = path
+        last_data_date = _read_last_date_str(newest_path)
         result.append(SymbolInfo(
             symbol=sym,
             name=meta.get("name", sym),
@@ -32,6 +60,8 @@ def get_stocks():
             spread_points=meta.get("spread_points", 20),
             yfinance_ticker=meta.get("yfinance_ticker", sym),
             available_tfs=available_tfs(sym),
+            last_synced=last_synced,
+            last_data_date=last_data_date,
         ))
     return result
 
@@ -152,3 +182,41 @@ def get_download_status(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
+
+
+# Default TFs to sync when a symbol has no existing data yet
+_DEFAULT_SYNC_TFS = ["H1", "H4", "D1"]
+
+
+@router.post("/stocks/sync-all")
+async def sync_all(req: SyncAllRequest):
+    """Incrementally sync all (or selected) registered symbols up to today."""
+    symbols = req.symbols if req.symbols else list_symbols()
+    job_id = str(uuid.uuid4())
+    _download_jobs[job_id] = {"status": "running", "progress": [], "done": 0, "total": 0}
+    log_event("data_sync_all_start", job_id=job_id, symbols=symbols)
+
+    async def _run():
+        total_work = len(symbols)
+        _download_jobs[job_id]["total"] = total_work
+
+        for sym in symbols:
+            yf_ticker = get_yf_ticker(sym)
+            tfs = available_tfs(sym) or _DEFAULT_SYNC_TFS
+            try:
+                results = await asyncio.to_thread(
+                    download, sym, yf_ticker, tfs, STOCKS_DIR, None, True
+                )
+                _download_jobs[job_id]["progress"].append(
+                    {"symbol": sym, "status": "done", "bars": results})
+                log_event("data_sync_done", symbol=sym, bars=results)
+            except Exception as e:
+                _download_jobs[job_id]["progress"].append(
+                    {"symbol": sym, "status": "error", "error": str(e)})
+                log_event("data_sync_error", symbol=sym, error=str(e))
+            _download_jobs[job_id]["done"] += 1
+
+        _download_jobs[job_id]["status"] = "complete"
+
+    asyncio.create_task(_run())
+    return {"job_id": job_id}

@@ -6,6 +6,7 @@ from sklearn.ensemble import HistGradientBoostingClassifier
 from .base import BaseStrategy, Signal
 from config import MLClassifierParams, SharedParams
 from backtest.ml_features import build_features, build_labels, FEATURE_COLS
+from indicators import atr as compute_atr
 
 
 class MLClassifierStrategy(BaseStrategy):
@@ -64,6 +65,13 @@ class MLClassifierStrategy(BaseStrategy):
                 out.loc[valid, direction] = model.predict_proba(Xv)[:, 1]
         return out
 
+    def _atr_series(self, dfs: dict, bars: pd.DataFrame) -> Optional[pd.Series]:
+        h1 = dfs.get("H1")
+        if h1 is None:
+            return None
+        a = compute_atr(h1["high"], h1["low"], h1["close"], 14)
+        return a.reindex(bars.index, method="ffill")
+
     def generate_signals(self, dfs: dict) -> pd.DataFrame:
         bars = dfs[self.p.tf]
         probas = self._probas(dfs)
@@ -76,6 +84,7 @@ class MLClassifierStrategy(BaseStrategy):
 
         closes = bars["close"].values
         buy_arr = buy_mask.values
+        atr_s = self._atr_series(dfs, bars) if self.p.manage_trail else None
 
         rows = []
         last_i = -10**9
@@ -84,13 +93,14 @@ class MLClassifierStrategy(BaseStrategy):
                 continue
             last_i = i
             entry = closes[i]
+            atr_val = float(atr_s.iloc[i]) if (atr_s is not None and not pd.isna(atr_s.iloc[i])) else 0.0
             if buy_arr[i]:
                 sl, tp, direction = entry - self.p.sl_pts, entry + self.p.tp_pts, "buy"
             else:
                 sl, tp, direction = entry + self.p.sl_pts, entry - self.p.tp_pts, "sell"
             rows.append(dict(
                 time=bars.index[i], direction=direction,
-                entry=entry, sl=sl, tp=tp, atr=0.0,
+                entry=entry, sl=sl, tp=tp, atr=atr_val,
             ))
 
         cols = ["direction", "entry", "sl", "tp", "atr"]
@@ -110,13 +120,21 @@ class MLClassifierStrategy(BaseStrategy):
         p_buy, p_sell = probas["buy"].iloc[-1], probas["sell"].iloc[-1]
         entry = float(bars["close"].iloc[-1])
 
+        atr_val = 0.0
+        if self.p.manage_trail:
+            atr_s = self._atr_series(dfs, bars)
+            if atr_s is not None:
+                v = float(atr_s.iloc[-1])
+                if not pd.isna(v):
+                    atr_val = v
+
         signal = None
         if p_buy >= self.p.threshold:
             signal = Signal("buy", entry, entry - self.p.sl_pts,
-                            entry + self.p.tp_pts, 0.0, current_bar)
+                            entry + self.p.tp_pts, atr_val, current_bar)
         elif p_sell >= self.p.threshold:
             signal = Signal("sell", entry, entry + self.p.sl_pts,
-                            entry - self.p.tp_pts, 0.0, current_bar)
+                            entry - self.p.tp_pts, atr_val, current_bar)
 
         if signal:
             self._last_signal_bar = current_bar

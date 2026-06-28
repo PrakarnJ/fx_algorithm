@@ -97,8 +97,8 @@ def suggest_regime(trial) -> RegimeSwitchParams:
         range_enabled=trial.suggest_categorical("range_enabled", [True, False]),
         z_lookback=trial.suggest_int("z_lookback", 40, 100, step=10),
         z_entry=trial.suggest_float("z_entry", 1.5, 3.0, step=0.25),
-        range_tp_pts=trial.suggest_float("range_tp_pts", 2.0, 8.0, step=1.0),
-        range_sl_pts=trial.suggest_float("range_sl_pts", 5.0, 20.0, step=1.0),
+        range_sl_atr_mult=trial.suggest_float("range_sl_atr_mult", 0.5, 1.5, step=0.25),
+        range_tp_atr_mult=trial.suggest_float("range_tp_atr_mult", 1.0, 3.0, step=0.5),
     )
 
 
@@ -134,12 +134,12 @@ def score(m):
     n = m.get("trade_count", 0)
     if n < 15:
         return -1.0 + n / 15.0
-    if m.get("expectancy_pts", -1) <= 0:
+    if m.get("expectancy_pips", -1) <= 0:
         return 0.0
     pf = m.get("profit_factor")
     pf = 4.0 if pf is None or not np.isfinite(pf) else min(pf, 4.0)
     # reward profit factor and total profit, lightly penalize drawdown
-    dd = max(m.get("max_dd_pts", 1e-6), 1e-6)
+    dd = max(m.get("max_dd_pips", 1e-6), 1e-6)
     return (pf - 1.0) * np.sqrt(n) * min(1.0, 50.0 / dd)
 
 
@@ -250,22 +250,22 @@ def write_report(results: list, dfs_full: dict):
                  if mc.get("valid") else "—")
         lines.append(
             f"| {r['family']} | {r['windows']} | {m.get('trade_count',0)} "
-            f"| {m.get('win_rate_%',0):.1f}% | {m.get('expectancy_pts',0):+.3f} "
-            f"| {m.get('profit_factor')} | {m.get('max_dd_pts',0):.1f} "
-            f"| {m.get('total_profit_pts',0):+.1f} | {pf_p5} |"
+            f"| {m.get('win_rate_%',0):.1f}% | {m.get('expectancy_pips',0):+.3f} "
+            f"| {m.get('profit_factor')} | {m.get('max_dd_pips',0):.1f} "
+            f"| {m.get('total_profit_pips',0):+.1f} | {pf_p5} |"
         )
 
-    best = max(results, key=lambda r: r["aggregate"].get("total_profit_pts", -1e9))
+    best = max(results, key=lambda r: r["aggregate"].get("total_profit_pips", -1e9))
     bm = best["aggregate"]
-    profitable = bm.get("total_profit_pts", 0) > 0 and (bm.get("profit_factor") or 0) > 1
+    profitable = bm.get("total_profit_pips", 0) > 0 and (bm.get("profit_factor") or 0) > 1
     lines.append(
         f"\n**Verdict:** "
         + (f"`{best['family']}` is the strongest — stitched walk-forward "
-           f"PF {bm.get('profit_factor')}, expectancy {bm.get('expectancy_pts'):+.3f} pts "
+           f"PF {bm.get('profit_factor')}, expectancy {bm.get('expectancy_pips'):+.3f} pts "
            f"over {bm.get('trade_count')} trades across {best['windows']} regimes. "
            if profitable else
            f"No family was robustly profitable across walk-forward windows "
-           f"(best `{best['family']}` total {bm.get('total_profit_pts',0):+.1f} pts). ")
+           f"(best `{best['family']}` total {bm.get('total_profit_pips',0):+.1f} pts). ")
         + "Original 90% WR / PF>2 / DD<10 target is not the right yardstick for a "
           "trend-follower (lower WR, larger wins by design); judged on risk-adjusted "
           "robustness across regimes instead."
@@ -296,7 +296,7 @@ def main():
         m = r["aggregate"]
         print(f"\n{r['family']}: OOS trades={m.get('trade_count')} "
               f"wr={m.get('win_rate_%')}% pf={m.get('profit_factor')} "
-              f"total={m.get('total_profit_pts')}pts", flush=True)
+              f"total={m.get('total_profit_pips')}pts", flush=True)
 
 
 if __name__ == "__main__":

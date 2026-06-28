@@ -172,7 +172,7 @@ def run_pipeline(download: bool, trials: int, wf_trials: int) -> dict:
     recommend = bool(
         wf_metrics.get("trade_count", 0) >= 20
         and pf is not None and pf > 1.2
-        and wf_metrics.get("expectancy_pts", 0) > 0
+        and wf_metrics.get("expectancy_pips", 0) > 0
     )
     proposal = {
         "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -217,7 +217,7 @@ def apply_proposal() -> dict:
     }
     OVERRIDE.write_text(json.dumps(payload, indent=1))
     print(f"Applied → {OVERRIDE}")
-    print("The bot now uses these params (config.py reads the override). Restart bot.py to pick up.")
+    print("Params applied — config.py reads the override on next import.")
     return proposal["new_params"]
 
 
@@ -253,7 +253,7 @@ def main():
         p = run_pipeline(not args.no_download, args.trials, args.wf_trials)
         wf = p["walkforward_metrics"]
         print(f"\nProposal: WF PF={wf.get('profit_factor')} "
-              f"trades={wf.get('trade_count')} total={wf.get('total_profit_pts')}pts "
+              f"trades={wf.get('trade_count')} total={wf.get('total_profit_pips')}pts "
               f"→ {'RECOMMENDED' if p['recommend'] else 'not recommended'}")
         print(f"Review + apply: python backtest/reoptimize.py --apply  (or use the dashboard)")
     except Exception as e:

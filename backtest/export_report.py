@@ -218,8 +218,8 @@ def load_walkforward() -> tuple:
         rows.append(dict(
             name=meta["label"].replace("★ ", ""), desc=meta["desc"][:80],
             oos_trades=m.get("trade_count", 0), oos_wr=m.get("win_rate_%", 0),
-            oos_exp=m.get("expectancy_pts", 0), oos_pf=m.get("profit_factor") or 0,
-            oos_dd=m.get("max_dd_pts", 0), verdict=meta["verdict"],
+            oos_exp=m.get("expectancy_pips", 0), oos_pf=m.get("profit_factor") or 0,
+            oos_dd=m.get("max_dd_pips", 0), verdict=meta["verdict"],
         ))
     # regime_switch first (it's the headline)
     variants.sort(key=lambda v: 0 if "regime" in v["key"] else 1)
@@ -244,7 +244,7 @@ def main() -> None:
             m = w["metrics"]
             print(f"  {wname:<4}  trades={m.get('trade_count', 0):>3}  "
                   f"wr={m.get('win_rate_%', 0)}%  pf={m.get('profit_factor')}  "
-                  f"exp={m.get('expectancy_pts')}")
+                  f"exp={m.get('expectancy_pips')}")
         variants_out.append({
             "key": v["key"],
             "label": v["label"],

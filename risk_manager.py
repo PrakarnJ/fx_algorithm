@@ -12,7 +12,8 @@ def calculate_lot(
 ) -> float:
     """
     Returns lot size so that (sl_distance * lot) risk == risk_pct * balance.
-    symbol_info is an MT5 SymbolInfo namedtuple (or any object with the same attrs).
+    symbol_info is any object with attrs: trade_tick_value, trade_tick_size,
+    volume_min, volume_step, volume_max.
     """
     risk_amount = balance * risk_pct
     tick_value = symbol_info.trade_tick_value

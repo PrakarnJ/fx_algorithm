@@ -1,10 +1,10 @@
-import { useState } from 'react'
-import { ChevronDown, ChevronRight, Download, Trash2, RefreshCw, Database } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { ChevronDown, ChevronRight, Download, Trash2, RefreshCw, Database, CheckCircle2, XCircle, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { TerminalCard } from '@/components/shared/TerminalCard'
 import { useStocks, useStockInfo } from '@/hooks/useApi'
 import { apiFetch } from '@/lib/api'
-import type { Stock } from '@/lib/api'
+import type { Stock, SyncJob } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
 const TF_ORDER = ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1', 'W1', 'MN']
@@ -27,7 +27,7 @@ function formatModified(ts: number): string {
 
 // ── Per-symbol expanded row ────────────────────────────────────────────────────
 
-function SymbolDetail({ symbol, onDeleted }: { symbol: string; onDeleted: () => void }) {
+function SymbolDetail({ symbol, onDeleted: _onDeleted }: { symbol: string; onDeleted: () => void }) {
   const { data: info, mutate } = useStockInfo(symbol)
   const [busy, setBusy] = useState<string | null>(null)
 
@@ -177,6 +177,12 @@ function SymbolRow({ stock, onDeleted }: { stock: Stock; onDeleted: () => void }
             }
           </div>
         </td>
+        <td className="px-3 py-3 font-mono text-xs text-foreground">
+          {stock.last_data_date ?? '—'}
+        </td>
+        <td className="px-3 py-3 font-mono text-xs text-muted-foreground">
+          {stock.last_synced ? formatModified(stock.last_synced) : '—'}
+        </td>
         <td className="px-3 py-3 text-right" onClick={e => e.stopPropagation()}>
           <div className="flex items-center gap-1 justify-end">
             <Button
@@ -226,6 +232,43 @@ function SymbolRow({ stock, onDeleted }: { stock: Stock; onDeleted: () => void }
 
 export function DataPage() {
   const { data: stocks, isLoading, error, mutate } = useStocks()
+  const [syncJobId, setSyncJobId] = useState<string | null>(null)
+  const [syncJob, setSyncJob] = useState<SyncJob | null>(null)
+
+  // Derive global last-sync from the stocks data itself (updates after mutate())
+  const globalLastSynced = stocks && stocks.length > 0
+    ? Math.max(...stocks.map(s => s.last_synced ?? 0))
+    : null
+
+  // Poll sync job progress every 1.5 s until complete
+  useEffect(() => {
+    if (!syncJobId) return
+    const iv = setInterval(async () => {
+      try {
+        const job = await apiFetch<SyncJob>(`/api/stocks/download/${syncJobId}`)
+        setSyncJob(job)
+        if (job.status === 'complete') {
+          clearInterval(iv)
+          setSyncJobId(null)
+          mutate()
+        }
+      } catch {
+        clearInterval(iv)
+        setSyncJobId(null)
+      }
+    }, 1500)
+    return () => clearInterval(iv)
+  }, [syncJobId, mutate])
+
+  async function handleSyncAll() {
+    setSyncJob(null)
+    const res = await apiFetch<{ job_id: string }>('/api/stocks/sync-all', { method: 'POST' })
+    setSyncJobId(res.job_id)
+  }
+
+  const syncPct = syncJob && syncJob.total > 0
+    ? Math.round((syncJob.done / syncJob.total) * 100)
+    : 0
 
   return (
     <div className="p-6 space-y-6">
@@ -234,17 +277,80 @@ export function DataPage() {
           <h1 className="text-xl font-semibold text-foreground">Data Library</h1>
           <p className="text-sm text-muted-foreground font-mono mt-1">
             Manage downloaded OHLC datasets
+            {globalLastSynced && globalLastSynced > 0 && (
+              <span className="ml-3 text-muted-foreground">
+                · last sync <span className="text-foreground">{formatModified(globalLastSynced)}</span>
+              </span>
+            )}
           </p>
         </div>
-        <Button
-          size="sm"
-          className="gap-1.5"
-          onClick={() => mutate()}
-        >
-          <RefreshCw className="h-3.5 w-3.5" />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1.5"
+            disabled={!!syncJobId}
+            onClick={handleSyncAll}
+            title="Incrementally sync all symbols to today"
+          >
+            <Download className={cn('h-3.5 w-3.5', syncJobId && 'animate-pulse')} />
+            {syncJobId ? 'Syncing…' : 'Sync All'}
+          </Button>
+          <Button
+            size="sm"
+            className="gap-1.5"
+            onClick={() => mutate()}
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            Refresh
+          </Button>
+        </div>
       </div>
+
+      {/* Sync progress panel */}
+      {syncJob && (
+        <div className="rounded-md border border-card-border bg-secondary/10 p-4 space-y-3">
+          <div className="flex items-center justify-between font-mono text-xs text-muted-foreground">
+            <span>Syncing {syncJob.done}/{syncJob.total} symbols</span>
+            <span>{syncPct}%</span>
+          </div>
+          <div className="h-1.5 w-full rounded-full bg-secondary/40 overflow-hidden">
+            <div
+              className="h-full bg-accent rounded-full transition-all duration-300"
+              style={{ width: `${syncPct}%` }}
+            />
+          </div>
+          {syncJob.progress.length > 0 && (
+            <div className="space-y-1 max-h-40 overflow-y-auto">
+              {syncJob.progress.map((entry, i) => (
+                <div key={i} className="flex items-center gap-2 font-mono text-xs">
+                  {entry.status === 'done'
+                    ? <CheckCircle2 className="h-3 w-3 text-buy shrink-0" />
+                    : <XCircle className="h-3 w-3 text-sell shrink-0" />}
+                  <span className={entry.status === 'done' ? 'text-foreground' : 'text-sell'}>
+                    {entry.symbol}
+                  </span>
+                  {entry.status === 'done' && entry.bars && (
+                    <span className="text-muted-foreground">
+                      {Object.entries(entry.bars).map(([tf, n]) => `${tf}: ${n.toLocaleString()}`).join(' · ')}
+                    </span>
+                  )}
+                  {entry.status === 'error' && (
+                    <span className="text-sell/70">{entry.error}</span>
+                  )}
+                </div>
+              ))}
+              {syncJobId && (
+                <div className="flex items-center gap-2 font-mono text-xs text-muted-foreground">
+                  <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+                  <span>fetching…</span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
 
       <TerminalCard title="Symbols">
         {isLoading ? (
@@ -267,6 +373,8 @@ export function DataPage() {
                   <th className="px-3 py-3 font-mono text-xs text-muted-foreground uppercase tracking-wider text-left">Symbol</th>
                   <th className="px-3 py-3 font-mono text-xs text-muted-foreground uppercase tracking-wider text-left">Name</th>
                   <th className="px-3 py-3 font-mono text-xs text-muted-foreground uppercase tracking-wider text-left">Available TFs</th>
+                  <th className="px-3 py-3 font-mono text-xs text-muted-foreground uppercase tracking-wider text-left">Data To</th>
+                  <th className="px-3 py-3 font-mono text-xs text-muted-foreground uppercase tracking-wider text-left">Last Sync</th>
                   <th className="px-3 py-3 font-mono text-xs text-muted-foreground uppercase tracking-wider text-right">Actions</th>
                 </tr>
               </thead>

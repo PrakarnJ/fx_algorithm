@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from pathlib import Path
 from typing import List, Optional
 
@@ -43,6 +44,17 @@ MIN_BARS = {
 }
 
 
+def _read_last_date(path: Path) -> Optional[pd.Timestamp]:
+    """Return the last bar timestamp in an existing CSV, or None."""
+    if not path.exists():
+        return None
+    try:
+        df = pd.read_csv(path, index_col="time", parse_dates=True, usecols=["time"])
+        return df.index.max() if not df.empty else None
+    except Exception:
+        return None
+
+
 def _normalize(df: pd.DataFrame) -> pd.DataFrame:
     """Lowercase columns, ensure UTC tz-aware DatetimeIndex, keep OHLC only."""
     df = df.rename(columns=str.lower)
@@ -63,9 +75,14 @@ def download(
     internal_tfs: List[str],
     stocks_dir: Path = STOCKS_DIR,
     progress_callback=None,
+    incremental: bool = False,
 ) -> dict:
     """
     Download data for the given internal TF keys and write CSVs.
+
+    When incremental=True and a CSV already exists, only new bars since the last
+    timestamp are fetched and appended (deduped). Falls back to full download if
+    no existing file is found.
 
     Returns a dict of {internal_tf: row_count} for successfully downloaded TFs.
     """
@@ -97,16 +114,32 @@ def download(
     done = 0
 
     for yf_iv, primary_tf in yf_intervals.items():
+        out_path = sym_dir / TF_TO_FILE[primary_tf]
         period = _PERIOD.get(yf_iv, "max")
-        logger.info(f"[download] {symbol} {yf_iv} period={period}")
-        try:
-            df = ticker.history(period=period, interval=yf_iv, auto_adjust=True)
-        except Exception as e:
-            logger.error(f"[download] {symbol} {yf_iv} failed: {e}")
-            done += 1
-            if progress_callback:
-                progress_callback(done, total, symbol, primary_tf, error=str(e))
-            continue
+
+        # Incremental: fetch only bars newer than the last saved timestamp
+        last_date = _read_last_date(out_path) if incremental else None
+        if last_date is not None:
+            start_str = (last_date - timedelta(days=1)).strftime("%Y-%m-%d")
+            logger.info(f"[download] {symbol} {yf_iv} incremental start={start_str}")
+            try:
+                df = ticker.history(start=start_str, interval=yf_iv, auto_adjust=True)
+            except Exception as e:
+                logger.error(f"[download] {symbol} {yf_iv} failed: {e}")
+                done += 1
+                if progress_callback:
+                    progress_callback(done, total, symbol, primary_tf, error=str(e))
+                continue
+        else:
+            logger.info(f"[download] {symbol} {yf_iv} period={period}")
+            try:
+                df = ticker.history(period=period, interval=yf_iv, auto_adjust=True)
+            except Exception as e:
+                logger.error(f"[download] {symbol} {yf_iv} failed: {e}")
+                done += 1
+                if progress_callback:
+                    progress_callback(done, total, symbol, primary_tf, error=str(e))
+                continue
 
         if df.empty:
             logger.warning(f"[download] {symbol} {yf_iv}: empty response")
@@ -116,7 +149,17 @@ def download(
             continue
 
         df = _normalize(df)
-        out_path = sym_dir / TF_TO_FILE[primary_tf]
+
+        # Merge with existing CSV when doing incremental update
+        if incremental and out_path.exists():
+            existing = pd.read_csv(out_path, index_col="time", parse_dates=True)
+            if existing.index.tz is None:
+                existing.index = existing.index.tz_localize("UTC")
+            else:
+                existing.index = existing.index.tz_convert("UTC")
+            df = pd.concat([existing, df])
+            df = df[~df.index.duplicated(keep="last")].sort_index()
+
         df.to_csv(out_path)
         results[primary_tf] = len(df)
         logger.info(f"[download] {symbol} {primary_tf}: {len(df)} bars → {out_path}")
@@ -124,9 +167,16 @@ def download(
         if progress_callback:
             progress_callback(done, total, symbol, primary_tf)
 
-        # Immediately resample H1 → H4 if we just downloaded H1
+        # Resample H1 → H4 after H1 is updated
         if yf_iv == "1h" and need_h1:
-            h4_df = resample_4h(df)
+            if incremental and out_path.exists():
+                # Re-resample from the full updated H1 for correct boundary bars
+                full_h1 = pd.read_csv(out_path, index_col="time", parse_dates=True)
+                if full_h1.index.tz is None:
+                    full_h1.index = full_h1.index.tz_localize("UTC")
+                h4_df = resample_4h(full_h1)
+            else:
+                h4_df = resample_4h(df)
             h4_path = sym_dir / TF_TO_FILE["H4"]
             h4_df.to_csv(h4_path)
             results["H4"] = len(h4_df)

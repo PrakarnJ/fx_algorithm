@@ -41,6 +41,9 @@ class Trade:
     exit_time: Optional[pd.Timestamp] = None
     exit_price: Optional[float] = None
     profit_pts: Optional[float] = None
+    # captured once at entry — never mutated (sl trails, initial_sl does not)
+    initial_sl: float = 0.0
+    exit_reason: str = ""   # "sl" | "trail" | "tp" | "time" | "eod"
 
 
 def load_data(symbol: str = SYMBOL) -> dict:
@@ -87,6 +90,9 @@ def run_backtest_fast(
     open_trade: Optional[Trade] = None
     consec_losses = 0
     pause_until: Optional[pd.Timestamp] = None
+    # Per-strategy trail override (e.g. TrendBreakoutParams, TrendFollowingParams)
+    _strat_be   = getattr(strategy.p, "breakeven_atr_mult", None)
+    _strat_trail = getattr(strategy.p, "trail_atr_mult", None)
 
     for i in range(len(bars)):
         bar_time = h1_index[i]
@@ -99,11 +105,14 @@ def run_backtest_fast(
         if open_trade is not None:
             open_trade.open_bars += 1
 
-            # Update SL (break-even / ATR trail — tighter after partial)
+            # Update SL (stepped or ATR trail depending on strategy)
             open_trade.sl = update_sl(
                 open_trade.direction, open_trade.entry_price,
                 open_trade.sl, open_trade.atr, close, shared,
                 partial_done=open_trade.partial_done,
+                breakeven_mult=_strat_be,
+                trail_mult=_strat_trail,
+                tp=open_trade.tp if getattr(strategy.p, "use_stepped_sl", False) else None,
             )
 
             # Partial / full-close at partial TP level
@@ -116,7 +125,7 @@ def run_backtest_fast(
                     if open_trade.full_close_at_partial:
                         # Scalp mode: close 100% here, treat like TP hit
                         _close_trade(open_trade, open_trade.partial_tp, bar_time, trades,
-                                     force_full=True, shared=shared)
+                                     force_full=True, shared=shared, exit_reason="tp")
                         consec_losses = 0
                         open_trade = None
                         continue
@@ -130,7 +139,7 @@ def run_backtest_fast(
 
             # Time-stop: close at bar close after N hours (open_bars counts exec bars)
             if open_trade.time_stop_hours > 0 and open_trade.open_bars >= open_trade.time_stop_hours * bars_per_hour:
-                _close_trade(open_trade, close, bar_time, trades, shared=shared)
+                _close_trade(open_trade, close, bar_time, trades, shared=shared, exit_reason="time")
                 consec_losses = consec_losses + 1 if open_trade.profit_pts < 0 else 0
                 open_trade = None
                 continue
@@ -177,20 +186,23 @@ def run_backtest_fast(
         partial_tp = None if (partial_tp_raw is None or (isinstance(partial_tp_raw, float) and np.isnan(partial_tp_raw))) else float(partial_tp_raw)
         time_stop = int(getattr(strategy.p, "time_stop_hours", 0))
 
+        initial_sl = float(sig["sl"])
         open_trade = Trade(
             entry_time=bar_time,
             direction=sig["direction"],
             entry_price=entry,
-            sl=float(sig["sl"]),
+            sl=initial_sl,
             tp=float(sig["tp"]),
             atr=float(sig["atr"]),
             partial_tp=partial_tp,
             time_stop_hours=time_stop,
             full_close_at_partial=bool(getattr(strategy.p, "full_close_at_partial", False)),
+            initial_sl=initial_sl,
         )
 
     if open_trade is not None:
-        _close_trade(open_trade, bars.iloc[-1]["close"], bars.index[-1], trades, shared=shared)
+        _close_trade(open_trade, bars.iloc[-1]["close"], bars.index[-1], trades,
+                     shared=shared, exit_reason="eod")
 
     return trades
 
@@ -203,6 +215,7 @@ def _close_trade(
     force_full: bool = False,
     shared: Optional[SharedParams] = None,
     is_sl_hit: bool = False,
+    exit_reason: str = "",
 ) -> None:
     if is_sl_hit and shared is not None and shared.slippage_pts > 0:
         slip = shared.slippage_pts * 0.01
@@ -223,6 +236,10 @@ def _close_trade(
         profit -= shared.swap_pts_per_night * 0.01 * nights
 
     trade.profit_pts = profit
+    # Resolve exit reason: "trail" when a stop that trailed past entry captures profit
+    if not exit_reason and is_sl_hit:
+        exit_reason = "trail" if profit > 0 else "sl"
+    trade.exit_reason = exit_reason or "tp"
     trades.append(trade)
 
 
@@ -240,6 +257,8 @@ def run_backtest(
     consec_losses = 0
     pause_until: Optional[pd.Timestamp] = None
     warmup = 250
+    _strat_be    = getattr(strategy.p, "breakeven_atr_mult", None)
+    _strat_trail = getattr(strategy.p, "trail_atr_mult", None)
 
     for i in range(warmup, len(h1)):
         bar = h1.iloc[i]
@@ -250,6 +269,8 @@ def run_backtest(
             open_trade.sl = update_sl(
                 open_trade.direction, open_trade.entry_price,
                 open_trade.sl, open_trade.atr, close, shared,
+                breakeven_mult=_strat_be, trail_mult=_strat_trail,
+                tp=open_trade.tp if getattr(strategy.p, "use_stepped_sl", False) else None,
             )
             hit_sl = (open_trade.direction == "buy"  and low  <= open_trade.sl) or \
                      (open_trade.direction == "sell" and high >= open_trade.sl)
@@ -285,10 +306,12 @@ def run_backtest(
         open_trade = Trade(
             entry_time=bar_time, direction=signal.direction,
             entry_price=entry, sl=signal.sl, tp=signal.tp, atr=signal.atr,
+            initial_sl=signal.sl,
         )
 
     if open_trade is not None:
-        _close_trade(open_trade, h1.iloc[-1]["close"], h1.index[-1], trades, shared=shared)
+        _close_trade(open_trade, h1.iloc[-1]["close"], h1.index[-1], trades,
+                     shared=shared, exit_reason="eod")
     return trades
 
 
@@ -324,8 +347,10 @@ def replay_iter(
     consec_losses = 0
     pause_until: Optional[pd.Timestamp] = None
 
-    # Window sizes for rolling slice — enough for all indicator lookbacks
-    _slice_sizes = {"M15": 600, "M30": 400, "H1": 500, "H4": 300, "D1": 150,
+    # Window sizes for rolling slice — enough for all indicator lookbacks.
+    # H4=650 so strategies that resample to Daily can compute EMA 89
+    # (650 H4 bars ≈ 108 trading days >> 89 bars needed).
+    _slice_sizes = {"M15": 600, "M30": 400, "H1": 500, "H4": 650, "D1": 150,
                     "W1": 100, "MN": 60, "M5": 1000, "M1": 2000}
 
     def _build_slice(bar_time: pd.Timestamp) -> dict:
@@ -358,6 +383,9 @@ def replay_iter(
             open_trade.sl = update_sl(
                 open_trade.direction, open_trade.entry_price,
                 open_trade.sl, open_trade.atr, close, shared,
+                breakeven_mult=getattr(strategy.p, "breakeven_atr_mult", None),
+                trail_mult=getattr(strategy.p, "trail_atr_mult", None),
+                tp=open_trade.tp if getattr(strategy.p, "use_stepped_sl", False) else None,
             )
             hit_sl = (open_trade.direction == "buy"  and low  <= open_trade.sl) or \
                      (open_trade.direction == "sell" and high >= open_trade.sl)
@@ -387,6 +415,7 @@ def replay_iter(
                         open_trade = Trade(
                             entry_time=bar_time, direction=signal.direction,
                             entry_price=entry, sl=signal.sl, tp=signal.tp, atr=signal.atr,
+                            initial_sl=signal.sl,
                         )
 
         # Indicator snapshot (optional — strategies may override get_indicators)

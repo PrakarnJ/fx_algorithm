@@ -1,11 +1,10 @@
 import { NavLink } from 'react-router-dom'
-import { LayoutDashboard, Play, BarChart2, ScrollText, Database, TrendingUp } from 'lucide-react'
+import { LayoutDashboard, Play, ScrollText, Database, TrendingUp } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useVersion } from '@/hooks/useApi'
 
 const navItems = [
-  { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
-  { to: '/backtest', label: 'Backtest', icon: BarChart2, end: false },
+  { to: '/', label: 'Research', icon: LayoutDashboard, end: true },
   { to: '/replay', label: 'Replay', icon: Play, end: false },
   { to: '/chart', label: 'Chart', icon: TrendingUp, end: false },
   { to: '/data', label: 'Data', icon: Database, end: false },

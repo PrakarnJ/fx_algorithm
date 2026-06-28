@@ -38,12 +38,14 @@ class RegimeSwitchStrategy(BaseStrategy):
             breakeven_atr_mult=params.trend_breakeven_atr_mult,
             trail_atr_mult=params.trend_trail_atr_mult,
             regime_filter=True, adx_trend=params.adx_trend, er_trend=params.er_trend,
+            partial_tp_enabled=params.trend_partial_tp_enabled,
+            partial_tp_r=params.trend_partial_tp_r,
         ), shared)
 
         self._range = MeanReversionStrategy(MeanReversionParams(
             tf=params.tf, z_lookback=params.z_lookback, z_entry=params.z_entry,
-            tp_pts=params.range_tp_pts, sl_pts=params.range_sl_pts,
-            cooldown_bars=params.cooldown_bars, manage_trail=False,
+            sl_atr_mult=params.range_sl_atr_mult, tp_atr_mult=params.range_tp_atr_mult,
+            cooldown_bars=params.cooldown_bars, manage_trail=True,
         ), shared)
         self._last_signal_bar: Optional[pd.Timestamp] = None
 
@@ -53,7 +55,7 @@ class RegimeSwitchStrategy(BaseStrategy):
             adx_trend=self.p.adx_trend, er_trend=self.p.er_trend)
 
     def generate_signals(self, dfs: dict) -> pd.DataFrame:
-        cols = ["direction", "entry", "sl", "tp", "atr"]
+        cols = ["direction", "entry", "sl", "tp", "atr", "partial_tp"]
         regime = self._regime(dfs)
 
         trend_sig = self._trend.generate_signals(dfs)   # already gated to trends
@@ -70,6 +72,9 @@ class RegimeSwitchStrategy(BaseStrategy):
         if len(merged) == 0:
             return pd.DataFrame(columns=cols)
         merged = merged[~merged.index.duplicated(keep="first")].sort_index()
+        # Ensure partial_tp column exists (range leg doesn't emit it)
+        if "partial_tp" not in merged.columns:
+            merged["partial_tp"] = float("nan")
         return merged[cols]
 
     def get_signal(self, dfs: dict) -> Optional[Signal]:

@@ -49,3 +49,24 @@ def adx(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> 
     di_sum = (plus_di + minus_di).replace(0, np.finfo(float).eps)
     dx     = 100 * (plus_di - minus_di).abs() / di_sum
     return dx.ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
+
+
+def stoch_rsi(close: pd.Series, period: int = 14, k: int = 3, d: int = 3):
+    """Stochastic RSI. Returns (K, D) as pd.Series on 0–100 scale."""
+    rsi_vals = rsi(close, period)
+    rsi_min = rsi_vals.rolling(period).min()
+    rsi_max = rsi_vals.rolling(period).max()
+    rng = (rsi_max - rsi_min).replace(0, np.finfo(float).eps)
+    raw_k = (rsi_vals - rsi_min) / rng * 100
+    K = raw_k.rolling(k).mean()
+    D = K.rolling(d).mean()
+    return K, D
+
+
+def macd(close: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9):
+    """MACD. Returns (macd_line, signal_line, histogram) as pd.Series."""
+    ema_fast = close.ewm(span=fast, adjust=False).mean()
+    ema_slow = close.ewm(span=slow, adjust=False).mean()
+    macd_line = ema_fast - ema_slow
+    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
+    return macd_line, signal_line, macd_line - signal_line

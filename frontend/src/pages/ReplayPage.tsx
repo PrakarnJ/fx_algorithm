@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -12,8 +12,11 @@ export function ReplayPage() {
   const { data: algos } = useAlgorithms()
   const { data: stocks } = useStocks()
 
-  const [selectedAlgo, setSelectedAlgo] = useState(searchParams.get('algo') ?? '')
-  const [selectedSymbol, setSelectedSymbol] = useState(searchParams.get('symbol') ?? '')
+  const algoParam = searchParams.get('algo')
+  const symbolParam = searchParams.get('symbol')
+
+  const [selectedAlgo, setSelectedAlgo] = useState(algoParam ?? '')
+  const [selectedSymbol, setSelectedSymbol] = useState(symbolParam ?? '')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [sessionId, setSessionId] = useState<string | null>(null)
@@ -53,16 +56,15 @@ export function ReplayPage() {
     doLoad(selectedAlgo, selectedSymbol, startDate, endDate)
   }
 
-  // Auto-load when navigated from Dashboard with ?algo=...&symbol=... URL params
-  const autoLoadedRef = useRef(false)
+  // Auto-load (and re-load) whenever the algo+symbol URL params change —
+  // covers both fresh mount and navigating from Dashboard while already on this page.
   useEffect(() => {
-    const algoParam = searchParams.get('algo')
-    const symbolParam = searchParams.get('symbol')
-    if (!autoLoadedRef.current && algoParam && symbolParam) {
-      autoLoadedRef.current = true
+    if (algoParam && symbolParam) {
+      setSelectedAlgo(algoParam)
+      setSelectedSymbol(symbolParam)
       doLoad(algoParam, symbolParam, '', '')
     }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [algoParam, symbolParam]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="flex flex-col h-screen">

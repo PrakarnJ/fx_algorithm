@@ -1,13 +1,12 @@
 import { useState, useMemo } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { ArrowUpDown, ArrowUp, ArrowDown, Play } from 'lucide-react'
+import { ArrowUpDown, ArrowUp, ArrowDown, Play, List } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { MetricBadge } from './MetricBadge'
-import { formatPts, formatR, formatDateTime } from '@/lib/formatters'
+import { formatPips, formatR, formatDateTime } from '@/lib/formatters'
 import type { BacktestResult } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
-type SortKey = 'rank' | 'algo' | 'symbol' | 'trade_count' | 'win_rate_pct' | 'profit_factor' | 'expectancy_pts' | 'expectancy_R' | 'max_dd_pts' | 'sharpe' | 'run_at'
+type SortKey = 'rank' | 'algo' | 'symbol' | 'trade_count' | 'win_rate_pct' | 'profit_factor' | 'expectancy_pips' | 'expectancy_R' | 'max_dd_pips' | 'sharpe' | 'run_at'
 type SortDir = 'asc' | 'desc'
 
 interface Column {
@@ -23,9 +22,9 @@ const COLUMNS: Column[] = [
   { key: 'trade_count', label: 'Trades', align: 'right' },
   { key: 'win_rate_pct', label: 'Win%', align: 'right' },
   { key: 'profit_factor', label: 'PF', align: 'right' },
-  { key: 'expectancy_pts', label: 'Exp(pts)', align: 'right' },
+  { key: 'expectancy_pips', label: 'Exp(pips)', align: 'right' },
   { key: 'expectancy_R', label: 'Exp(R)', align: 'right' },
-  { key: 'max_dd_pts', label: 'Max DD(pts)', align: 'right' },
+  { key: 'max_dd_pips', label: 'Max DD(pips)', align: 'right' },
   { key: 'sharpe', label: 'Sharpe', align: 'right' },
   { key: 'run_at', label: 'Run At' },
 ]
@@ -39,9 +38,9 @@ function getValue(result: BacktestResult, key: SortKey): number | string {
     case 'trade_count': return result.metrics?.trade_count ?? 0
     case 'win_rate_pct': return result.metrics?.win_rate_pct ?? 0
     case 'profit_factor': return result.metrics?.profit_factor ?? 0
-    case 'expectancy_pts': return result.metrics?.expectancy_pts ?? 0
+    case 'expectancy_pips': return result.metrics?.expectancy_pips ?? 0
     case 'expectancy_R': return result.metrics?.expectancy_R ?? 0
-    case 'max_dd_pts': return result.metrics?.max_dd_pts ?? 0
+    case 'max_dd_pips': return result.metrics?.max_dd_pips ?? 0
     case 'sharpe': return result.metrics?.sharpe ?? 0
     default: return 0
   }
@@ -49,10 +48,11 @@ function getValue(result: BacktestResult, key: SortKey): number | string {
 
 interface RankingTableProps {
   results: BacktestResult[]
+  onReplay?: (algo: string, symbol: string) => void
+  onShowTrades?: (result: BacktestResult) => void
 }
 
-export function RankingTable({ results }: RankingTableProps) {
-  const navigate = useNavigate()
+export function RankingTable({ results, onReplay, onShowTrades }: RankingTableProps) {
   const [sortKey, setSortKey] = useState<SortKey>('profit_factor')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
 
@@ -144,13 +144,13 @@ export function RankingTable({ results }: RankingTableProps) {
                 <MetricBadge value={result.metrics?.profit_factor ?? 0} type="pf" />
               </td>
               <td className="px-3 py-3 text-right font-mono text-foreground">
-                {formatPts(result.metrics?.expectancy_pts)}
+                {formatPips(result.metrics?.expectancy_pips)}
               </td>
               <td className="px-3 py-3 text-right font-mono text-foreground">
                 {formatR(result.metrics?.expectancy_R)}
               </td>
               <td className="px-3 py-3 text-right">
-                <MetricBadge value={result.metrics?.max_dd_pts ?? 0} type="dd" />
+                <MetricBadge value={result.metrics?.max_dd_pips ?? 0} type="dd" />
               </td>
               <td className="px-3 py-3 text-right">
                 <MetricBadge value={result.metrics?.sharpe ?? 0} type="sharpe" />
@@ -159,17 +159,26 @@ export function RankingTable({ results }: RankingTableProps) {
                 {formatDateTime(result.run_at)}
               </td>
               <td className="px-3 py-3 text-right">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 px-2 text-xs"
-                  onClick={() =>
-                    navigate(`/replay?algo=${encodeURIComponent(result.algo)}&symbol=${encodeURIComponent(result.symbol)}`)
-                  }
-                >
-                  <Play className="h-3 w-3 mr-1" />
-                  Replay
-                </Button>
+                <div className="flex items-center justify-end gap-1.5">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 px-2 text-xs"
+                    onClick={() => onReplay?.(result.algo, result.symbol)}
+                  >
+                    <Play className="h-3 w-3 mr-1" />
+                    Replay
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 px-2 text-xs"
+                    onClick={() => onShowTrades?.(result)}
+                  >
+                    <List className="h-3 w-3 mr-1" />
+                    Trades
+                  </Button>
+                </div>
               </td>
             </tr>
           ))}

@@ -1,8 +1,8 @@
 # FX Algorithm Platform
 
-Multi-asset algorithmic trading research platform with a FastAPI backend, React frontend, and MT5 live-trading bot.
+Multi-asset algorithmic trading research platform with a FastAPI backend, React frontend, and backtesting engine.
 
-**Live strategy (XAUUSD):** `regime_switch` — composite Donchian trend-follower + z-score mean-reversion router. Walk-forward OOS on real Dukascopy 2022–2026 data: **PF 1.77, 64% WR, Sharpe 2.38, +1,247 pts** over 131 trades. Wired for **demo trading only** (never forward-tested; profit is tail-driven). See [Validation status](#validation-status) and `DEPLOYMENT.md`.
+**Best strategy (XAUUSD):** `regime_switch` — composite Donchian trend-follower + z-score mean-reversion router. Walk-forward OOS on real Dukascopy 2022–2026 data: **PF 1.77, 64% WR, Sharpe 2.38, +1,247 pts** over 131 trades. Backtested result only — see [Validation status](#validation-status).
 
 ## How the platform works
 
@@ -25,14 +25,14 @@ Multi-asset algorithmic trading research platform with a FastAPI backend, React 
 └──────────────────────────────────────────────┘
 ```
 
-The **algorithms/** directory is the single source of truth — the live bot (`bot.py`), the backtest engine, and the API all import from there. The old `strategies/` directory has been removed.
+The **algorithms/** directory is the single source of truth — the backtest engine and the API both import from there.
 
-## How the live strategy works
+## How the best strategy works
 
-The bot detects the market **regime** and routes to the matching tactic:
+`regime_switch` detects the market **regime** and routes to the matching tactic:
 
 - **Trending** (ADX strong + Kaufman efficiency ratio high + price vs EMA200) → **Donchian breakout trend-follower**: enter with the move, ride it with an ATR trailing stop (no fixed TP).
-- **Ranging** (everything else, ~75% of the time) → **z-score mean-reversion** fade, or stand aside (current live config rides trends only).
+- **Ranging** (everything else, ~75% of the time) → **z-score mean-reversion** fade, or stand aside (current config rides trends only).
 
 The single most important lesson driving this design: **no one tactic works in all regimes.** Fade strategies print money in ranges and blow up in trends; trend-followers do the reverse.
 
@@ -43,7 +43,7 @@ The single most important lesson driving this design: **no one tactic works in a
 | Trend-Following (EMA crossover) | synthetic | negative expectancy | ❌ |
 | London Breakout (+ boosters) | synthetic | 62.5% WR, PF 2.02 | ⚠️ synthetic-only artifact |
 | Mean-reversion / RSI-fade / ML (8h Optuna campaign) | **real** | every finalist **PF < 0.5** | ❌ killed by 2025+ bull |
-| **Regime-Aware Switch** | **real** | **PF 1.77 walk-forward** | ✅ best, demo-only |
+| **Regime-Aware Switch** | **real** | **PF 1.77 walk-forward** | ✅ best |
 
 Full blow-by-blow in `STRATEGY_LOG.md`. Synthetic "winners" were fictions of the data generator; on real gold they lose.
 
@@ -55,8 +55,6 @@ Full blow-by-blow in `STRATEGY_LOG.md`. Synthetic "winners" were fictions of the
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 ```
-
-`MetaTrader5` (needed for live trading) only installs on **Windows** — comment it out from `requirements.txt` on macOS/Linux.
 
 ### Frontend (Node.js)
 
@@ -117,10 +115,9 @@ Pages: **Dashboard** (rankings) · **Backtest** (run algo×symbol jobs) · **Rep
 ### Re-optimization (keep params fresh)
 
 ```bash
-.venv/bin/python3 backtest/reoptimize.py                # download → optimize → propose
+.venv/bin/python3 backtest/reoptimize.py                # optimize → propose
 .venv/bin/python3 backtest/reoptimize.py --no-download  # skip download step
-.venv/bin/python3 backtest/reoptimize.py --apply        # apply proposal to live config
-.venv/bin/python3 backtest/reoptimize.py --install-cron # monthly cron (1st, 06:00)
+.venv/bin/python3 backtest/reoptimize.py --apply        # apply proposal to config
 ```
 
 Writes `data/regime_params.json`; loaded by `config.py` at import time — delete to revert to hardcoded defaults.
@@ -133,21 +130,13 @@ Writes `data/regime_params.json`; loaded by `config.py` at import time — delet
 # → http://localhost:8765   tabs: #overview #performance #optimize #deploy
 ```
 
-### Live trading (Windows + MT5 only)
-
-```bash
-.venv/bin/python3 bot.py
-```
-
 ## Project layout
 
 ```
 config.py                     # symbol, SharedParams + all strategy params, REGIME_PARAMS
-bot.py                        # live trading loop: manage position, check entry (60 s)
 indicators.py                 # EMA, RSI, ATR, ADX (Wilder)
-trade_manager.py              # break-even + ATR trailing SL (shared by bot.py and engine)
+trade_manager.py              # break-even + ATR trailing SL (shared by engine)
 risk_manager.py               # lot sizing, drawdown guard (loss-streak pause, daily stop)
-mt5_connector.py / executor.py  # MT5 connection + order placement (Windows only)
 
 algorithms/                   # ★ single source of truth for all strategies
   base.py                     # Signal dataclass (with SL/TP validation), BaseStrategy
@@ -158,7 +147,7 @@ algorithms/                   # ★ single source of truth for all strategies
   rsi_fade.py                 # RSI-extreme fade scalper
   trend_breakout.py           # Donchian / MA-momentum with ATR trail
   ml_classifier.py            # gradient-boosted TP-before-SL classifier
-  regime_switch.py            # ★ deployed: regime-aware composite
+  regime_switch.py            # ★ best: regime-aware composite
 
 api/                          # FastAPI backend
   main.py                     # app, CORS, router mounts, static frontend serving
@@ -195,7 +184,7 @@ backtest/
   metrics.py                  # trade-frequency-aware Sharpe, PF, drawdown, R-multiples
   walkforward.py              # rolling train→test WFO; stitched OOS + Monte-Carlo bands
   montecarlo.py               # bootstrap robustness (CIs, skip-test, slippage)
-  reoptimize.py               # download → optimize → walk-forward → propose → apply
+  reoptimize.py               # optimize → walk-forward → propose → apply
   campaign.py                 # multi-family Optuna campaign (TRAIN/VAL/OOS)
   compare.py / optimize.py / walk_forward.py / iterate.py   # original head-to-head pipeline
   ml_features.py              # backward-looking features + TP-before-SL labels
@@ -207,7 +196,6 @@ data/
   XAUUSD_{M15,H1,H4}.csv     # real bars (gitignored; download via Dukascopy)
   convert_dukascopy.py        # convert Dukascopy CSVs → pipeline format
   generate_synthetic.py       # synthetic GBM bars (pipeline testing only)
-  download.py                 # real bars from MT5 (Windows only)
 
 tests/
   conftest.py                 # make_bars / make_dfs / StubStrategy fixtures
@@ -222,7 +210,7 @@ report/                       # legacy dashboard static UI (served by dashboard_
 
 Every strategy in `algorithms/` implements two entry points that must stay in sync:
 
-- `get_signal(dfs) → Signal | None` — incremental, used by the live bot on the latest bars.
+- `get_signal(dfs) → Signal | None` — incremental, used by the replay API on the latest bars.
 - `generate_signals(dfs) → DataFrame` — vectorized over all history, used by the fast backtest engine (~100× faster).
 
 `dfs` is a dict of UTC-indexed OHLC DataFrames keyed `"M15"`, `"H1"`, `"H4"`.
@@ -244,20 +232,9 @@ Every strategy in `algorithms/` implements two entry points that must stay in sy
 
 ## Validation status
 
-**The deployed strategy is validated on real data via walk-forward — but is NOT proven for live trading.**
+**The best strategy is validated on real data via walk-forward — but NOT proven for live trading.**
 
 - Every decision metric comes from out-of-sample windows the optimizer never touched.
 - **2025+ is no longer a clean holdout** (this design was informed by seeing it). The only true test is forward data.
 - **Profit is tail-driven:** ~69% of the regime-switch's walk-forward profit came from a single 2026 trend window. Monte-Carlo p5 PF ≈ 1.03 — real edge, but fragile.
 - Synthetic data validates the *pipeline*, never a market edge.
-
-## Live deployment (demo first)
-
-Live trading requires **Windows + a running MT5 terminal**. `ACTIVE_STRATEGY` is set to `regime_switch` with `REGIME_PARAMS` optimized on the most recent 12 months. **Read `DEPLOYMENT.md` before risking anything** — it lays out the mandatory demo → micro-live → scale ladder, abort criteria, and how to re-derive parameters as markets drift.
-
-## Risk controls (live)
-
-- Position sized to risk `SHARED.risk_pct` of balance per trade; drop to ≤ 0.5% before real money.
-- Skip entries when spread exceeds `max_spread_points`.
-- Pause 24h after N consecutive losses; halt for the day after the daily-loss cap.
-- Break-even move then ATR trailing stop (`trade_manager.update_sl`) — same code path as backtests.

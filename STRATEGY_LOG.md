@@ -147,3 +147,18 @@ Verdict: **❌ REJECTED**
 
 ### Prior context — 8h fade-strategy campaign (real data, FAILED)
 Before the regime-aware pivot, an 8h Optuna campaign searched mean-reversion / RSI-fade / ML-classifier / breakout-scalp families (~50k trials). All looked viable in-sample and on 2024 validation (ML: 84% WR, PF 1.47) but **every finalist had PF < 0.5 on 2025+ OOS** — losing strategies. Root cause: 2025+ gold went parabolic (+61%, price ~doubled) and the fade families are anti-trend. This motivated the regime-aware / trend-following pivot above. Full detail: backtest/campaign_runs/campaign_results.json.
+
+
+---
+
+## Walk-Forward 2026-06-27 13:05 UTC — Regime-Aware / Trend-Following (real Dukascopy data)
+
+**Method:** rolling 12mo train → 3mo test across 2022→2026; parameters re-selected on each train window, evaluated on the next (unseen) test window; all test segments stitched into one OOS curve.  
+**Regime mix (whole history, H1):** trend_up 10%, trend_down 10%, range 80%.  
+**Note:** 2025+ is no longer a clean holdout (it informed this design); walk-forward across all regimes is the honest metric, and true confirmation needs forward data.
+
+| Family | Windows | OOS trades | Win % | Expectancy | PF | Max DD | Total | MC p5 PF |
+|---|---|---|---|---|---|---|---|---|
+| regime_switch | 12 | 243 | 52.7% | -2.761 | 0.686 | 778.7 | -670.9 | 0.533 |
+
+**Verdict:** No family was robustly profitable across walk-forward windows (best `regime_switch` total -670.9 pts). Original 90% WR / PF>2 / DD<10 target is not the right yardstick for a trend-follower (lower WR, larger wins by design); judged on risk-adjusted robustness across regimes instead.

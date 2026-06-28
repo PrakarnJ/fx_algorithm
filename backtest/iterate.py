@@ -100,11 +100,11 @@ def _optimize_and_oos(
                         continue
                     if win_rate_objective:
                         # Maximise win rate subject to minimum expectancy
-                        if m.get("expectancy_pts", -999) < 2.0:
+                        if m.get("expectancy_pips", -999) < 2.0:
                             continue
                         score = m.get("win_rate_%", 0)
                     else:
-                        score = m.get("expectancy_pts", -999) * (n ** 0.5)
+                        score = m.get("expectancy_pips", -999) * (n ** 0.5)
                     if score > best_score:
                         best_score = score
                         best_params = candidate
@@ -233,9 +233,9 @@ def main():
         )
 
         wr  = oos_m.get("win_rate_%",     0.0)
-        exp = oos_m.get("expectancy_pts", -999)
+        exp = oos_m.get("expectancy_pips", -999)
         pf  = oos_m.get("profit_factor",  0.0)
-        dd  = oos_m.get("max_dd_pts",     0.0)
+        dd  = oos_m.get("max_dd_pips",     0.0)
         n   = oos_m.get("trade_count",    0)
 
         improved = wr > best_wr and exp > 0 and n >= 30

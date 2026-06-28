@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import time
 import uuid
+from datetime import timedelta
 from typing import Dict, List, Optional
 
 import pandas as pd
@@ -16,6 +18,15 @@ from data_pipeline.capabilities import check_capability
 from data_pipeline.downloader import load_symbol_data
 
 SESSION_TTL_SECONDS = 3600  # sessions older than 1 hour are purged on next create
+
+
+def _sanitize_snapshot(snap: dict) -> dict:
+    """Strip NaN/Inf floats — Python json.dumps emits them as bare NaN/Infinity,
+    which is invalid JSON and makes the browser's JSON.parse throw silently."""
+    return {
+        k: v for k, v in snap.items()
+        if not (isinstance(v, float) and not math.isfinite(v))
+    }
 
 
 def _serialize_signal(sig) -> Optional[dict]:
@@ -40,7 +51,7 @@ def _serialize_trade(t) -> Optional[dict]:
         "entry_price": t.entry_price,
         "sl": t.sl,
         "tp": t.tp,
-        "profit_pts": t.profit_pts,
+        "profit_pips": t.profit_pts,
         "open_bars": t.open_bars,
         "outcome": "WIN" if (t.profit_pts or 0) > 0 else "LOSS",
     }
@@ -55,7 +66,7 @@ def _serialize_frame(frame: ReplayFrame, total_bars: int) -> dict:
         "signal": _serialize_signal(frame.signal),
         "open_trade": _serialize_trade(frame.open_trade_before),
         "trade_closed": _serialize_trade(frame.trade_closed),
-        "indicator_snapshot": frame.indicator_snapshot,
+        "indicator_snapshot": _sanitize_snapshot(frame.indicator_snapshot),
         "total_bars": total_bars,
     }
 
@@ -93,6 +104,10 @@ class ReplaySession:
             dfs = load_symbol_data(self.symbol, manifest.required_tfs)
             self.exec_tf = manifest.exec_tf
 
+            # Extra H4 history needed so Daily EMA 89 warms up inside _build_slice.
+            # 650 H4 bars ≈ 108 trading days; keep 120 calendar days before cutoff.
+            H4_EXTRA_DAYS = 120
+
             if self.start_date or self.end_date:
                 # Date-range mode: slice to requested window, prepend 250-bar warmup
                 exec_df = dfs[manifest.exec_tf]
@@ -104,7 +119,11 @@ class ReplaySession:
                 window_start_pos = exec_df.index.get_loc(exec_df[mask].index[0]) if mask.any() else 0
                 warmup_start_pos = max(0, window_start_pos - 250)
                 cutoff_time = exec_df.index[warmup_start_pos]
-                dfs = {k: v[v.index >= cutoff_time] for k, v in dfs.items()}
+                h4_cutoff = cutoff_time - timedelta(days=H4_EXTRA_DAYS)
+                dfs = {
+                    k: (v[v.index >= h4_cutoff] if k == 'H4' else v[v.index >= cutoff_time])
+                    for k, v in dfs.items()
+                }
                 if self.end_date:
                     dfs = {k: v[v.index <= self.end_date] for k, v in dfs.items()}
             else:
@@ -114,7 +133,11 @@ class ReplaySession:
                 keep_exec = replay_bars + 250
                 if keep_exec < exec_len:
                     cutoff_time = dfs[manifest.exec_tf].index[-keep_exec]
-                    dfs = {k: v[v.index >= cutoff_time] for k, v in dfs.items()}
+                    h4_cutoff = cutoff_time - timedelta(days=H4_EXTRA_DAYS)
+                    dfs = {
+                        k: (v[v.index >= h4_cutoff] if k == 'H4' else v[v.index >= cutoff_time])
+                        for k, v in dfs.items()
+                    }
 
             algo = manifest.strategy_class(manifest.default_params, SHARED)
             if manifest.needs_fit:

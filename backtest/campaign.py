@@ -74,14 +74,14 @@ def feasibility_score(m: dict) -> float:
     n = m.get("trade_count", 0)
     if n < TARGETS["min_trades"]:
         return -1.0 + 0.9 * n / TARGETS["min_trades"]
-    if m.get("expectancy_pts", -1) <= 0:
+    if m.get("expectancy_pips", -1) <= 0:
         return 0.0
     pf = m.get("profit_factor")
     pf = 4.0 if pf is None or not np.isfinite(pf) else min(pf, 4.0)
     return min(
         m["win_rate_%"] / TARGETS["wr"],
         pf / TARGETS["pf"],
-        TARGETS["dd"] / max(m["max_dd_pts"], 1e-6),
+        TARGETS["dd"] / max(m["max_dd_pips"], 1e-6),
     )
 
 
@@ -92,7 +92,7 @@ def hits_targets(m: dict) -> bool:
         m.get("trade_count", 0) >= TARGETS["min_trades"]
         and m.get("win_rate_%", 0) >= TARGETS["wr"]
         and pf_ok
-        and m.get("max_dd_pts", 1e9) < TARGETS["dd"]
+        and m.get("max_dd_pips", 1e9) < TARGETS["dd"]
     )
 
 
@@ -332,7 +332,7 @@ def final_phase(state: dict, dfs_full: dict) -> dict:
         wr = m.get("win_rate_%", 0)
         print(f"[OOS] {c['family']:<15} trades={m.get('trade_count',0):>4} "
               f"wr={wr:>5.1f}% pf={m.get('profit_factor')} "
-              f"dd={m.get('max_dd_pts')} score={entry['oos_score']}", flush=True)
+              f"dd={m.get('max_dd_pips')} score={entry['oos_score']}", flush=True)
     save_state(state)
     return {"finalists": results}
 
@@ -360,10 +360,10 @@ def write_report(state: dict, final: dict, budget_hours: float) -> None:
         lines.append(
             f"| {r['family']} | {trials} | {r['val_score']:.3f} "
             f"| {m.get('trade_count', 0)} | {m.get('win_rate_%', 0):.1f}% "
-            f"| {m.get('expectancy_pts', 0):+.2f} | {m.get('profit_factor')} "
-            f"| {m.get('max_dd_pts', 0):.1f} "
+            f"| {m.get('expectancy_pips', 0):+.2f} | {m.get('profit_factor')} "
+            f"| {m.get('max_dd_pips', 0):.1f} "
             f"| {b.get('win_rate_%', {}).get('p5', '—')} "
-            f"| {b.get('max_dd_pts', {}).get('p95', '—')} "
+            f"| {b.get('max_dd_pips', {}).get('p95', '—')} "
             f"| {'✅ MET' if r['targets_met'] else '❌'} |"
         )
     met = [r for r in final["finalists"] if r["targets_met"]]

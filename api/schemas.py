@@ -24,11 +24,17 @@ class SymbolInfo(BaseModel):
     spread_points: int
     yfinance_ticker: str
     available_tfs: List[str]
+    last_synced: Optional[float] = None  # Unix timestamp of most recently modified TF file
+    last_data_date: Optional[str] = None  # Latest bar date in the data (YYYY-MM-DD)
 
 
 class DownloadRequest(BaseModel):
     symbols: List[str]
     internal_tfs: List[str]   # e.g. ["H1", "H4", "D1"]
+
+
+class SyncAllRequest(BaseModel):
+    symbols: Optional[List[str]] = None  # None = all registered symbols
 
 
 class BacktestRequest(BaseModel):
@@ -43,13 +49,13 @@ class MetricsResult(BaseModel):
     trade_count: int
     win_rate_pct: float
     profit_factor: Optional[float]
-    expectancy_pts: float
+    expectancy_pips: float
     expectancy_R: Optional[float] = None
-    avg_win_pts: float
-    avg_loss_pts: float
-    max_dd_pts: float
+    avg_win_pips: float
+    avg_loss_pips: float
+    max_dd_pips: float
     max_dd_R: Optional[float] = None
-    total_profit_pts: float
+    total_profit_pips: float
     total_R: Optional[float] = None
     sharpe: float
 
@@ -61,8 +67,10 @@ class TradeResult(BaseModel):
     entry_price: float
     exit_price: Optional[float]
     sl: float
+    initial_sl: float
     tp: float
-    profit_pts: Optional[float]
+    profit_pips: Optional[float]
+    exit_reason: str = ""   # "sl" | "trail" | "tp" | "time" | "eod"
 
 
 class ComboResult(BaseModel):

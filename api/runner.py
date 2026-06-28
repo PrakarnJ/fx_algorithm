@@ -31,8 +31,10 @@ def _serialize_trade(t) -> TradeResult:
         entry_price=t.entry_price,
         exit_price=t.exit_price,
         sl=t.sl,
+        initial_sl=getattr(t, "initial_sl", t.sl),
         tp=t.tp,
-        profit_pts=t.profit_pts,
+        profit_pips=t.profit_pts,
+        exit_reason=getattr(t, "exit_reason", ""),
     )
 
 
@@ -47,13 +49,13 @@ def _build_metrics(trades) -> Optional[MetricsResult]:
         trade_count=m["trade_count"],
         win_rate_pct=m["win_rate_%"],
         profit_factor=m.get("profit_factor"),
-        expectancy_pts=m["expectancy_pts"],
+        expectancy_pips=m["expectancy_pips"],
         expectancy_R=r.get("expectancy_R"),
-        avg_win_pts=m["avg_win_pts"],
-        avg_loss_pts=m["avg_loss_pts"],
-        max_dd_pts=m["max_dd_pts"],
+        avg_win_pips=m["avg_win_pips"],
+        avg_loss_pips=m["avg_loss_pips"],
+        max_dd_pips=m["max_dd_pips"],
         max_dd_R=r.get("max_dd_R"),
-        total_profit_pts=m["total_profit_pts"],
+        total_profit_pips=m["total_profit_pips"],
         total_R=r.get("total_R"),
         sharpe=m["sharpe"],
     )

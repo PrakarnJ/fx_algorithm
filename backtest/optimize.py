@@ -24,7 +24,7 @@ def _score(metrics: dict) -> float:
     n = metrics.get("trade_count", 0)
     if n < MIN_TRADES:
         return -float("inf")
-    return metrics["expectancy_pts"] * (n ** 0.5)
+    return metrics["expectancy_pips"] * (n ** 0.5)
 
 
 def optimize_trend(shared: SharedParams) -> Optional[dict]:
