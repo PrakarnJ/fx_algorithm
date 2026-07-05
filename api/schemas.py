@@ -1,109 +1,111 @@
-"""Pydantic v2 request/response models for the FX Algorithm Platform API."""
+"""Pydantic v2 request/response models for the XAUUSD Pine Studio API."""
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel
 
 
-class AlgoInfo(BaseModel):
-    name: str
-    display_name: str
-    required_tfs: List[str]
-    exec_tf: str
-    needs_fit: bool
-    description: str
-    indicator_keys: List[str]
+# ── Pine compile / backtest ─────────────────────────────────────────────────
+
+class PineSource(BaseModel):
+    source: str
 
 
-class SymbolInfo(BaseModel):
-    symbol: str
-    name: str
-    tick_size: float
-    spread_points: int
-    yfinance_ticker: str
-    available_tfs: List[str]
-    last_synced: Optional[float] = None  # Unix timestamp of most recently modified TF file
-    last_data_date: Optional[str] = None  # Latest bar date in the data (YYYY-MM-DD)
+class PineError(BaseModel):
+    line: int
+    col: int
+    message: str
 
 
-class DownloadRequest(BaseModel):
-    symbols: List[str]
-    internal_tfs: List[str]   # e.g. ["H1", "H4", "D1"]
+class PineValidateResponse(BaseModel):
+    ok: bool
+    script_type: Optional[str] = None   # "indicator" | "strategy"
+    title: Optional[str] = None
+    errors: List[PineError] = []
 
 
-class SyncAllRequest(BaseModel):
-    symbols: Optional[List[str]] = None  # None = all registered symbols
+class TesterSettings(BaseModel):
+    """Overrides for strategy() declaration args (TradingView tester model)."""
+    initial_capital: Optional[float] = None
+    default_qty_type: Optional[str] = None    # "fixed" | "percent_of_equity" | "cash"
+    default_qty_value: Optional[float] = None
+    commission_type: Optional[str] = None     # "none" | "percent" | "cash_per_contract" | "cash_per_order"
+    commission_value: Optional[float] = None
 
 
-class BacktestRequest(BaseModel):
-    algo_names: List[str]
-    symbols: List[str]
-    spread_overrides: Optional[Dict[str, int]] = None  # symbol → spread_points
-    start_date: Optional[str] = None  # "YYYY-MM-DD"
-    end_date: Optional[str] = None    # "YYYY-MM-DD"
+class PineBacktestRequest(BaseModel):
+    source: str
+    timeframe: str = "H1"               # M15 | H1 | H4
+    start_date: Optional[str] = None    # "YYYY-MM-DD"
+    end_date: Optional[str] = None      # "YYYY-MM-DD"
+    settings: Optional[TesterSettings] = None
 
 
-class MetricsResult(BaseModel):
-    trade_count: int
-    win_rate_pct: float
-    profit_factor: Optional[float]
-    expectancy_pips: float
-    expectancy_R: Optional[float] = None
-    avg_win_pips: float
-    avg_loss_pips: float
-    max_dd_pips: float
-    max_dd_R: Optional[float] = None
-    total_profit_pips: float
-    total_R: Optional[float] = None
-    sharpe: float
+class PlotSeries(BaseModel):
+    id: str
+    title: str
+    color: str
+    style: str = "line"                 # "line" | "histogram" | "circles"
+    overlay: bool = True                # price pane vs separate pane
+    # Parallel to bars; None where the series is na
+    values: List[Optional[float]]
 
 
-class TradeResult(BaseModel):
-    entry_time: str
-    exit_time: Optional[str]
-    direction: str
+class ShapeMarker(BaseModel):
+    time: int                           # unix seconds
+    shape: str                          # "triangleup" | "triangledown" | ...
+    location: str                       # "abovebar" | "belowbar" | "absolute"
+    color: str
+    text: str = ""
+    price: Optional[float] = None       # for location == "absolute"
+
+
+class HLine(BaseModel):
+    price: float
+    title: str = ""
+    color: str = "#787b86"
+
+
+class TradeRecord(BaseModel):
+    entry_time: int                     # unix seconds (fill bar)
+    exit_time: Optional[int]
+    direction: str                      # "long" | "short"
     entry_price: float
     exit_price: Optional[float]
-    sl: float
-    initial_sl: float
-    tp: float
-    profit_pips: Optional[float]
-    exit_reason: str = ""   # "sl" | "trail" | "tp" | "time" | "eod"
+    qty: float
+    profit: Optional[float]             # currency
+    profit_pct: Optional[float]
+    entry_id: str = ""
+    exit_reason: str = ""               # "close" | "stop" | "limit" | "end_of_data"
 
 
-class ComboResult(BaseModel):
-    id: str
-    algo: str
-    symbol: str
-    exec_tf: str
-    metrics: Optional[MetricsResult]
-    trades: List[TradeResult]
-    run_at: str
-    error: Optional[str] = None
+class TesterMetrics(BaseModel):
+    """TradingView Strategy Tester 'Overview' numbers."""
+    net_profit: float
+    net_profit_pct: float
+    gross_profit: float
+    gross_loss: float
+    profit_factor: Optional[float]
+    max_drawdown: float
+    max_drawdown_pct: float
+    total_trades: int
+    percent_profitable: Optional[float]
+    avg_trade: Optional[float]
+    avg_win: Optional[float]
+    avg_loss: Optional[float]
+    open_pl: float = 0.0
 
 
-class BacktestJobStatus(BaseModel):
-    job_id: str
-    total: int
-    done: int
-    status: str   # "running" | "complete" | "error"
-    results: List[ComboResult]
-
-
-class ReplayStartRequest(BaseModel):
-    algo_name: str
-    symbol: str
-    start_date: Optional[str] = None  # "YYYY-MM-DD"
-    end_date: Optional[str] = None    # "YYYY-MM-DD"
-
-
-class ReplayStartResponse(BaseModel):
-    session_id: str
-    total_bars: int
-    algo_name: str
-    symbol: str
-    exec_tf: str
-    start_date: Optional[str] = None
-    end_date: Optional[str] = None
+class PineBacktestResponse(BaseModel):
+    ok: bool
+    script_type: Optional[str] = None
+    title: Optional[str] = None
+    errors: List[PineError] = []
+    bars: List[Dict[str, Any]] = []     # {time,open,high,low,close}
+    plots: List[PlotSeries] = []
+    shapes: List[ShapeMarker] = []
+    hlines: List[HLine] = []
+    trades: List[TradeRecord] = []
+    equity: List[Optional[float]] = []  # per-bar equity curve (strategy only)
+    metrics: Optional[TesterMetrics] = None

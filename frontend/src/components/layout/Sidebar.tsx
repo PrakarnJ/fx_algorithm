@@ -1,13 +1,10 @@
 import { NavLink } from 'react-router-dom'
-import { LayoutDashboard, Play, ScrollText, Database, TrendingUp } from 'lucide-react'
+import { CandlestickChart, ScrollText } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useVersion } from '@/hooks/useApi'
 
 const navItems = [
-  { to: '/', label: 'Research', icon: LayoutDashboard, end: true },
-  { to: '/replay', label: 'Replay', icon: Play, end: false },
-  { to: '/chart', label: 'Chart', icon: TrendingUp, end: false },
-  { to: '/data', label: 'Data', icon: Database, end: false },
+  { to: '/', label: 'Studio', icon: CandlestickChart, end: true },
   { to: '/logs', label: 'Logs', icon: ScrollText, end: false },
 ]
 
@@ -15,14 +12,14 @@ export function Sidebar() {
   const { data: health } = useVersion()
 
   return (
-    <aside className="w-56 min-h-screen bg-background border-r border-card-border flex flex-col flex-shrink-0">
+    <aside className="w-48 min-h-screen bg-background border-r border-card-border flex flex-col flex-shrink-0">
       {/* Logo / Title */}
       <div className="px-6 py-5 border-b border-card-border">
         <div className="font-mono text-accent text-sm font-bold tracking-widest uppercase">
-          FX_ALGO
+          PINE_STUDIO
         </div>
         <div className="font-mono text-muted-foreground text-xs mt-0.5">
-          Research Platform
+          XAUUSD Backtester
         </div>
       </div>
 
@@ -51,7 +48,7 @@ export function Sidebar() {
       {/* Footer */}
       <div className="px-6 py-4 border-t border-card-border space-y-0.5">
         <div className="font-mono text-muted-foreground text-xs">
-          XAUUSD · demo only
+          XAUUSD · backtest only
         </div>
         {health?.version && (
           <div className="font-mono text-muted-foreground/50 text-xs">

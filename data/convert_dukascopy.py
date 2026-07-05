@@ -10,8 +10,8 @@ DOWNLOAD (requires Node.js):
 Then run:
   .venv/bin/python3 data/convert_dukascopy.py <directory_with_csv_files>
 
-Output: stocks/XAUUSD/{15m,1h,4h}.csv — merged with existing yfinance data so
-recent bars are preserved and Dukascopy fills in the historical gaps.
+Output: data/XAUUSD_{M15,H1,H4}.csv — merged with any existing bars so
+re-running only fills gaps and extends the history.
 """
 from __future__ import annotations
 
@@ -21,13 +21,13 @@ from pathlib import Path
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import STOCKS_DIR, SYMBOL
+from config import DATA_DIR, TF_TO_FILE
 
-# Dukascopy TF name → internal file name inside stocks/{SYMBOL}/
+# Dukascopy TF name → internal file name inside data/
 TF_MAP = {
-    "m15": "15m.csv",
-    "h1":  "1h.csv",
-    "h4":  "4h.csv",
+    "m15": TF_TO_FILE["M15"],
+    "h1":  TF_TO_FILE["H1"],
+    "h4":  TF_TO_FILE["H4"],
 }
 
 
@@ -50,10 +50,10 @@ def convert(sources: list[Path], out_filename: str) -> None:
     duka_df = pd.concat(parts).sort_index()
     duka_df = duka_df[~duka_df.index.duplicated(keep="last")]
 
-    out_path = STOCKS_DIR / SYMBOL / out_filename
+    out_path = DATA_DIR / out_filename
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Merge with existing yfinance data so recent bars aren't lost
+    # Merge with existing bars so re-runs extend rather than clobber history
     if out_path.exists():
         existing = pd.read_csv(out_path, index_col="time", parse_dates=True)
         if existing.index.tz is None:
@@ -61,7 +61,7 @@ def convert(sources: list[Path], out_filename: str) -> None:
         else:
             existing.index = existing.index.tz_convert("UTC")
         merged = pd.concat([duka_df, existing])
-        # Keep yfinance version when timestamps overlap (more recent / adjusted)
+        # Keep the existing bar when timestamps overlap
         merged = merged[~merged.index.duplicated(keep="last")].sort_index()
         print(f"  Merged {len(duka_df):,} Dukascopy bars + {len(existing):,} existing → {len(merged):,} bars")
     else:
@@ -76,7 +76,7 @@ def convert(sources: list[Path], out_filename: str) -> None:
 def main(input_dir: str) -> None:
     src_dir = Path(input_dir)
     print(f"Reading Dukascopy CSVs from: {src_dir.resolve()}")
-    print(f"Writing to: {(STOCKS_DIR / SYMBOL).resolve()}\n")
+    print(f"Writing to: {DATA_DIR.resolve()}\n")
 
     found_any = False
     for tf_in, out_filename in TF_MAP.items():

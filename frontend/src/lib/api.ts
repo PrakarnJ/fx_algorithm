@@ -1,5 +1,4 @@
 export const BASE_URL = 'http://localhost:8000'
-export const WS_BASE = 'ws://localhost:8000/api'
 
 export async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
@@ -12,139 +11,7 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
   return res.json() as Promise<T>
 }
 
-// Types for API responses
-export interface Algorithm {
-  name: string
-  display_name: string
-  required_tfs: string[]
-  exec_tf: string
-  needs_fit: boolean
-  description: string
-  indicator_keys: string[]
-}
-
-export interface Stock {
-  symbol: string
-  name: string
-  tick_size: number
-  spread_points: number
-  yfinance_ticker: string
-  available_tfs: string[]
-  last_synced: number | null    // Unix timestamp of most recently modified TF file
-  last_data_date: string | null // Latest bar date in the data (YYYY-MM-DD)
-}
-
-export interface BacktestMetrics {
-  trade_count: number
-  win_rate_pct: number
-  profit_factor: number
-  expectancy_pips: number
-  expectancy_R: number
-  avg_win_pips: number
-  avg_loss_pips: number
-  max_dd_pips: number
-  max_dd_R: number
-  total_profit_pips: number
-  total_R: number
-  sharpe: number
-}
-
-export interface BacktestResult {
-  id: string
-  algo: string
-  symbol: string
-  exec_tf: string
-  metrics: BacktestMetrics
-  trades: Trade[]
-  run_at: string
-  error: string | null
-}
-
-export interface Trade {
-  entry_time: string
-  exit_time: string | null
-  direction: string        // 'buy' | 'sell'
-  entry_price: number
-  exit_price: number | null
-  sl: number               // final SL (may be trailed from initial)
-  initial_sl: number       // SL at entry — use this for risk sizing and display
-  tp: number
-  profit_pips: number | null
-  exit_reason: string      // 'sl' | 'trail' | 'tp' | 'time' | 'eod'
-}
-
-export interface ReplayBar {
-  open: number
-  high: number
-  low: number
-  close: number
-}
-
-export interface ReplaySignal {
-  direction: string
-  entry_price: number
-  sl: number
-  tp: number
-  atr: number
-}
-
-export interface ReplayOpenTrade {
-  direction: string
-  entry_price: number
-  sl: number
-  tp: number
-  open_bars: number
-}
-
-export interface ReplayTradeClosed {
-  direction: string
-  profit_pips: number
-  outcome: string
-}
-
-export interface ReplayFrame {
-  type: 'frame'
-  bar_index: number
-  bar_time: string
-  bar: ReplayBar
-  signal: ReplaySignal | null
-  open_trade: ReplayOpenTrade | null
-  trade_closed: ReplayTradeClosed | null
-  indicator_snapshot: Record<string, number | string>
-  total_bars: number
-}
-
-export interface LogEntry {
-  ts: string
-  type: string
-  [key: string]: unknown
-}
-
-export interface StockTFEntry {
-  bar_count: number
-  file_size_bytes: number
-  start_date: string
-  end_date: string
-  last_modified: number
-}
-
-export interface StockTFInfo {
-  [tf: string]: StockTFEntry
-}
-
-export interface SyncJobEntry {
-  symbol: string
-  status: 'done' | 'error'
-  bars?: Record<string, number>
-  error?: string
-}
-
-export interface SyncJob {
-  status: 'running' | 'complete'
-  done: number
-  total: number
-  progress: SyncJobEntry[]
-}
+// ── chart data ────────────────────────────────────────────────────────────────
 
 export interface OHLCBar {
   time: number
@@ -152,4 +19,106 @@ export interface OHLCBar {
   high: number
   low: number
   close: number
+}
+
+export interface ChartInfo {
+  symbol: string
+  timeframes: Record<string, { bars: number; start: string | null; end: string | null }>
+}
+
+// ── Pine backtest ─────────────────────────────────────────────────────────────
+
+export interface PineError {
+  line: number
+  col: number
+  message: string
+}
+
+export interface PlotSeries {
+  id: string
+  title: string
+  color: string
+  style: 'line' | 'histogram' | 'circles'
+  overlay: boolean
+  values: (number | null)[]
+}
+
+export interface ShapeMarker {
+  time: number
+  shape: string
+  location: 'abovebar' | 'belowbar' | 'absolute'
+  color: string
+  text: string
+  price: number | null
+}
+
+export interface HLine {
+  price: number
+  title: string
+  color: string
+}
+
+export interface TradeRecord {
+  entry_time: number
+  exit_time: number | null
+  direction: 'long' | 'short'
+  entry_price: number
+  exit_price: number | null
+  qty: number
+  profit: number | null
+  profit_pct: number | null
+  entry_id: string
+  exit_reason: string
+}
+
+export interface TesterMetrics {
+  net_profit: number
+  net_profit_pct: number
+  gross_profit: number
+  gross_loss: number
+  profit_factor: number | null
+  max_drawdown: number
+  max_drawdown_pct: number
+  total_trades: number
+  percent_profitable: number | null
+  avg_trade: number | null
+  avg_win: number | null
+  avg_loss: number | null
+  open_pl: number
+}
+
+export interface PineBacktestResponse {
+  ok: boolean
+  script_type: 'indicator' | 'strategy' | null
+  title: string | null
+  errors: PineError[]
+  bars: OHLCBar[]
+  plots: PlotSeries[]
+  shapes: ShapeMarker[]
+  hlines: HLine[]
+  trades: TradeRecord[]
+  equity: (number | null)[]
+  metrics: TesterMetrics | null
+}
+
+export interface PineBacktestRequest {
+  source: string
+  timeframe: string
+  start_date?: string | null
+  end_date?: string | null
+}
+
+export function runPineBacktest(req: PineBacktestRequest): Promise<PineBacktestResponse> {
+  return apiFetch<PineBacktestResponse>('/api/pine/backtest', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  })
+}
+
+// ── logs ──────────────────────────────────────────────────────────────────────
+
+export interface LogEntry {
+  ts: string
+  type: string
+  [key: string]: unknown
 }

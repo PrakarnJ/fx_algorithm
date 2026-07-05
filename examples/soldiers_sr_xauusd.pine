@@ -1,0 +1,315 @@
+//@version=6
+// ============================================================
+//  Two/Three Soldiers + S/R Location — XAUUSD M15 (Strategy V3)
+//  อัปเดตจาก V2:
+//   [B] Pattern เลือกได้ 2 หรือ 3 soldiers (default 2 = เข้าเร็วขึ้น signal เยอะขึ้น)
+//   [A] S/R Location Filter — pattern ต้องเกิดใกล้ S/R zone
+//       (pivot cluster ที่มี touch >= 3 จุด ตาม concept เดิม)
+//  โครงเดิมที่คงไว้: StochRSI momentum, Fib entry/SL/TP,
+//  BE 40% + Fib trailing, Session filter, Daily loss guard
+// ============================================================
+strategy("Soldiers + S/R Location — XAUUSD M15",
+     shorttitle = "TSM v3",
+     overlay = true,
+     pyramiding = 0,
+     initial_capital = 200,
+     currency = currency.USD,
+     process_orders_on_close = true,
+     calc_on_every_tick = false)
+
+// ============================================================
+// INPUTS
+// ============================================================
+grpEntry = "═══ Entry Mode ═══"
+entryMode  = input.string("Pullback 38.2%", "Entry Mode",
+                 options = ["Pullback 38.2%", "Market at Pattern Close"], group = grpEntry)
+expiryBars = input.int(6, "Pullback: ยกเลิก order หลังกี่แท่ง", minval = 1, group = grpEntry)
+
+grpPattern = "═══ Pattern (B) ═══"
+numSoldiers   = input.int(2, "จำนวน Soldiers (2 = เร็ว/เยอะ, 3 = ช้า/เข้ม)", minval = 2, maxval = 3, group = grpPattern)
+minBodyPct    = input.float(50.0, "Body ขั้นต่ำ (% ของ range แท่ง)", minval = 0, maxval = 100, group = grpPattern)
+atrMult       = input.float(1.0,  "ขนาด pattern ขั้นต่ำ (x ATR)", minval = 0.1, step = 0.1, group = grpPattern)
+atrLen        = input.int(14, "ATR Length", minval = 1, group = grpPattern)
+reqOpenInBody = input.bool(false, "บังคับ open อยู่ใน body แท่งก่อน (เข้มขึ้น)", group = grpPattern)
+reqBreakHigh  = input.bool(true,  "Soldier สุดท้ายต้อง close ทะลุ high/low แท่งก่อน (follow-through)", group = grpPattern)
+
+grpSR = "═══ S/R Location Filter (A) ═══"
+useSR      = input.bool(true, "เปิดใช้ S/R Filter", group = grpSR,
+                 tooltip = "Pattern ต้องเกิดใกล้ S/R zone ถึงจะนับ — ปิดเพื่อเทียบผลได้")
+pivLeft    = input.int(10, "Pivot Left Bars",  minval = 2, group = grpSR)
+pivRight   = input.int(10, "Pivot Right Bars", minval = 2, group = grpSR,
+                 tooltip = "10/10 บน M15 ≈ swing ระดับ H1 ขึ้นไป")
+minTouches = input.int(3,  "จำนวน touch ขั้นต่ำของ zone", minval = 1, group = grpSR)
+zoneATR    = input.float(1.0, "ความกว้าง zone (x ATR)", minval = 0.1, step = 0.1, group = grpSR)
+maxPivots  = input.int(100, "จำนวน pivot ที่เก็บย้อนหลัง", minval = 10, group = grpSR)
+
+grpStoch = "═══ StochRSI Confirmation ═══"
+rsiLen     = input.int(14, "RSI Length", minval = 1, group = grpStoch)
+stochLen   = input.int(14, "Stochastic Length", minval = 1, group = grpStoch)
+kSmooth    = input.int(3, "%K Smoothing", minval = 1, group = grpStoch)
+dSmooth    = input.int(3, "%D Smoothing", minval = 1, group = grpStoch)
+midLevel   = input.float(50.0, "Momentum Midline", group = grpStoch)
+exhaustLvl = input.float(95.0, "Anti-Exhaustion Level", group = grpStoch)
+
+grpRisk = "═══ SL / TP / Trailing ═══"
+beTriggerPct = input.float(40.0, "Break Even Trigger (% ของระยะ Entry→TP)", minval = 1, maxval = 99, group = grpRisk)
+beBufferPts  = input.float(100, "BE Buffer (points)", minval = 0, group = grpRisk)
+lotSize      = input.float(0.01, "Fixed Lot / Qty", minval = 0.01, step = 0.01, group = grpRisk)
+
+grpGuard = "═══ Filters & Risk Guards ═══"
+useSession   = input.bool(true, "ใช้ Session Filter", group = grpGuard)
+sessTimes    = input.session("1400-2300", "ช่วงเวลาเทรด (เวลาไทย)", group = grpGuard)
+sessTz       = input.string("Asia/Bangkok", "Timezone", group = grpGuard)
+useDailyLoss = input.bool(true, "ใช้ Max Daily Loss", group = grpGuard)
+maxDailyLoss = input.float(50.0, "Max Daily Loss (USD)", minval = 1, group = grpGuard)
+showFib      = input.bool(true, "แสดง Fib levels ของ setup ล่าสุด", group = grpGuard)
+
+// ============================================================
+// INDICATORS
+// ============================================================
+atr = ta.atr(atrLen)
+
+rsiVal = ta.rsi(close, rsiLen)
+kRaw   = ta.stoch(rsiVal, rsiVal, rsiVal, stochLen)
+k      = ta.sma(kRaw, kSmooth)
+d      = ta.sma(k, dSmooth)
+
+bullMomentum = k > midLevel and k > d and k < exhaustLvl
+bearMomentum = k < midLevel and k < d and k > (100.0 - exhaustLvl)
+
+// ============================================================
+// [A] S/R ZONES — pivot clustering (touch >= minTouches)
+// ============================================================
+var array<float> pivLows  = array.new_float()
+var array<float> pivHighs = array.new_float()
+
+pl = ta.pivotlow(low, pivLeft, pivRight)
+ph = ta.pivothigh(high, pivLeft, pivRight)
+
+if not na(pl)
+    array.push(pivLows, pl)
+    if array.size(pivLows) > maxPivots
+        array.shift(pivLows)
+if not na(ph)
+    array.push(pivHighs, ph)
+    if array.size(pivHighs) > maxPivots
+        array.shift(pivHighs)
+
+countTouches(arr, level, tol) =>
+    c = 0
+    n = array.size(arr)
+    if n > 0
+        for i = 0 to n - 1
+            if math.abs(array.get(arr, i) - level) <= tol
+                c += 1
+    c
+
+// นับ touch จากทั้ง pivot low และ pivot high (S/R flip นับรวม)
+nearSRZone(level) =>
+    tol = zoneATR * atr
+    countTouches(pivLows, level, tol) + countTouches(pivHighs, level, tol) >= minTouches
+
+// ============================================================
+// [B] PATTERN — 2 หรือ 3 Soldiers
+// ============================================================
+bodyPctOK(idx) =>
+    rng = high[idx] - low[idx]
+    rng > 0 and math.abs(close[idx] - open[idx]) / rng * 100.0 >= minBodyPct
+
+openInPrevBody(idx) =>
+    not reqOpenInBody or
+     (open[idx] >= math.min(open[idx + 1], close[idx + 1]) and
+      open[idx] <= math.max(open[idx + 1], close[idx + 1]))
+
+// ---- Bullish ----
+bull3 =
+     close[3] < open[3] and
+     close[2] > open[2] and close[1] > open[1] and close > open and
+     close[2] > close[3] and close[1] > close[2] and close > close[1] and
+     openInPrevBody(2) and openInPrevBody(1) and openInPrevBody(0) and
+     bodyPctOK(2) and bodyPctOK(1) and bodyPctOK(0) and
+     (not reqBreakHigh or close > high[1]) and
+     (high - low[2]) >= atrMult * atr
+
+bull2 =
+     close[2] < open[2] and
+     close[1] > open[1] and close > open and
+     close[1] > close[2] and close > close[1] and
+     openInPrevBody(1) and openInPrevBody(0) and
+     bodyPctOK(1) and bodyPctOK(0) and
+     (not reqBreakHigh or close > high[1]) and
+     (high - low[1]) >= atrMult * atr
+
+// ---- Bearish ----
+bear3 =
+     close[3] > open[3] and
+     close[2] < open[2] and close[1] < open[1] and close < open and
+     close[2] < close[3] and close[1] < close[2] and close < close[1] and
+     openInPrevBody(2) and openInPrevBody(1) and openInPrevBody(0) and
+     bodyPctOK(2) and bodyPctOK(1) and bodyPctOK(0) and
+     (not reqBreakHigh or close < low[1]) and
+     (high[2] - low) >= atrMult * atr
+
+bear2 =
+     close[2] > open[2] and
+     close[1] < open[1] and close < open and
+     close[1] < close[2] and close < close[1] and
+     openInPrevBody(1) and openInPrevBody(0) and
+     bodyPctOK(1) and bodyPctOK(0) and
+     (not reqBreakHigh or close < low[1]) and
+     (high[1] - low) >= atrMult * atr
+
+bullPatternRaw = numSoldiers == 3 ? bull3 : bull2
+bearPatternRaw = numSoldiers == 3 ? bear3 : bear2
+
+// swing ของ pattern (จุดต่ำสุด/สูงสุดรวมแท่งนำ)
+bullSwL = numSoldiers == 3 ? math.min(low[3], low[2])  : math.min(low[2], low[1])
+bullSwH = high
+bearSwH = numSoldiers == 3 ? math.max(high[3], high[2]) : math.max(high[2], high[1])
+bearSwL = low
+
+// [A] Location: จุดเริ่ม pattern ต้องอยู่ใกล้ S/R zone
+bullPattern = bullPatternRaw and (not useSR or nearSRZone(bullSwL))
+bearPattern = bearPatternRaw and (not useSR or nearSRZone(bearSwH))
+
+// ============================================================
+// FILTERS
+// ============================================================
+inSession = not useSession or not na(time(timeframe.period, sessTimes, sessTz))
+
+var float dayStartEquity = na
+if na(dayStartEquity) or ta.change(time("D")) != 0
+    dayStartEquity := strategy.equity
+dailyOK = not useDailyLoss or (strategy.equity - dayStartEquity) > -maxDailyLoss
+
+flatNow  = strategy.position_size == 0
+canTrade = inSession and dailyOK
+
+isPullback = entryMode == "Pullback 38.2%"
+beBuffer   = beBufferPts * syminfo.mintick
+
+// ============================================================
+// SETUP STATE — Fib scale: level(x) = L + x*(H-L) (bull)
+// 0.382 = SL | 0.618 = pullback entry | 1.272 = trail | 1.618 = TP
+// ============================================================
+var float swL      = na
+var float swH      = na
+var float entryLvl = na
+var float slInit   = na
+var float tpLvl    = na
+var int   setupBar = na
+var bool  pendLong  = false
+var bool  pendShort = false
+var float curSL   = na
+var bool  beDone  = false
+
+fibL(l, h, x) => l + x * (h - l)
+fibS(l, h, x) => h - x * (h - l)
+
+// ============================================================
+// NEW SETUP — BULL
+// ============================================================
+if bullPattern and bullMomentum and canTrade and flatNow
+    strategy.cancel_all()
+    swL      := bullSwL
+    swH      := bullSwH
+    entryLvl := fibL(swL, swH, 0.618)
+    slInit   := fibL(swL, swH, 0.382)
+    tpLvl    := fibL(swL, swH, 1.618)
+    setupBar := bar_index
+    pendShort := false
+    if isPullback
+        strategy.entry("Long", strategy.long, qty = lotSize, limit = entryLvl)
+        pendLong := true
+    else
+        strategy.entry("Long", strategy.long, qty = lotSize)
+        pendLong := false
+
+// ============================================================
+// NEW SETUP — BEAR
+// ============================================================
+if bearPattern and bearMomentum and canTrade and flatNow
+    strategy.cancel_all()
+    swH      := bearSwH
+    swL      := bearSwL
+    entryLvl := fibS(swL, swH, 0.618)
+    slInit   := fibS(swL, swH, 0.382)
+    tpLvl    := fibS(swL, swH, 1.618)
+    setupBar := bar_index
+    pendLong := false
+    if isPullback
+        strategy.entry("Short", strategy.short, qty = lotSize, limit = entryLvl)
+        pendShort := true
+    else
+        strategy.entry("Short", strategy.short, qty = lotSize)
+        pendShort := false
+
+// ============================================================
+// PENDING ORDER MANAGEMENT
+// ============================================================
+if pendLong and flatNow
+    if (bar_index - setupBar > expiryBars) or (low < slInit)
+        strategy.cancel("Long")
+        pendLong := false
+
+if pendShort and flatNow
+    if (bar_index - setupBar > expiryBars) or (high > slInit)
+        strategy.cancel("Short")
+        pendShort := false
+
+// ============================================================
+// POSITION MANAGEMENT — BE + FIB TRAILING
+// ============================================================
+justOpened = strategy.position_size != 0 and strategy.position_size[1] == 0
+if justOpened
+    curSL  := slInit
+    beDone := false
+    pendLong  := false
+    pendShort := false
+
+if strategy.position_size > 0
+    ep   = strategy.position_avg_price
+    dist = tpLvl - ep
+    if not beDone and dist > 0 and high >= ep + (beTriggerPct / 100.0) * dist
+        curSL  := math.max(curSL, ep + beBuffer)
+        beDone := true
+    if beDone
+        if high >= fibL(swL, swH, 1.0)
+            curSL := math.max(curSL, fibL(swL, swH, 0.618))
+        if high >= fibL(swL, swH, 1.272)
+            curSL := math.max(curSL, fibL(swL, swH, 1.0))
+    strategy.exit("XL", from_entry = "Long", stop = curSL, limit = tpLvl)
+
+if strategy.position_size < 0
+    ep   = strategy.position_avg_price
+    dist = ep - tpLvl
+    if not beDone and dist > 0 and low <= ep - (beTriggerPct / 100.0) * dist
+        curSL  := math.min(curSL, ep - beBuffer)
+        beDone := true
+    if beDone
+        if low <= fibS(swL, swH, 1.0)
+            curSL := math.min(curSL, fibS(swL, swH, 0.618))
+        if low <= fibS(swL, swH, 1.272)
+            curSL := math.min(curSL, fibS(swL, swH, 1.0))
+    strategy.exit("XS", from_entry = "Short", stop = curSL, limit = tpLvl)
+
+// ============================================================
+// VISUALIZATION
+// ============================================================
+plotshape(bullPattern and bullMomentum, title = "Bull Setup", style = shape.triangleup,
+     location = location.belowbar, color = color.new(color.green, 0), size = size.small, text = "BUY")
+plotshape(bearPattern and bearMomentum, title = "Bear Setup", style = shape.triangledown,
+     location = location.abovebar, color = color.new(color.red, 0), size = size.small, text = "SELL")
+// pattern ที่โดน S/R filter ตัดทิ้ง (ไว้ดูว่า filter ทำงานแค่ไหน)
+plotshape(useSR and bullPatternRaw and not bullPattern, title = "Bull ถูกตัดโดย S/R", style = shape.xcross,
+     location = location.belowbar, color = color.new(color.gray, 40), size = size.tiny)
+plotshape(useSR and bearPatternRaw and not bearPattern, title = "Bear ถูกตัดโดย S/R", style = shape.xcross,
+     location = location.abovebar, color = color.new(color.gray, 40), size = size.tiny)
+
+activeOrPending = strategy.position_size != 0 or pendLong or pendShort
+plot(showFib and activeOrPending ? entryLvl : na, "Entry 38.2%", color = color.new(color.blue, 0), style = plot.style_linebr)
+plot(showFib and activeOrPending ? tpLvl    : na, "TP 1.618",    color = color.new(color.teal, 0), style = plot.style_linebr)
+plot(strategy.position_size != 0 ? curSL    : na, "SL ปัจจุบัน",  color = color.new(color.red, 0),  style = plot.style_linebr)
+
+bgcolor(not inSession ? color.new(color.gray, 92) : na, title = "นอก Session")
+bgcolor(not dailyOK   ? color.new(color.red, 90)  : na, title = "Daily Loss Stop")

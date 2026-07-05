@@ -1,4 +1,4 @@
-"""FX Algorithm Platform — FastAPI backend entry point."""
+"""XAUUSD Pine Studio — FastAPI backend entry point."""
 import sys
 from pathlib import Path
 
@@ -9,15 +9,15 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from api.routers import algorithms, backtest, logs, replay, stocks
+from api.routers import chart, logs, pine
 from config import FRONTEND_DIST
 
-PLATFORM_VERSION = "2.1.0"
+PLATFORM_VERSION = "3.0.0"
 
 app = FastAPI(
-    title="FX Algorithm Platform",
+    title="XAUUSD Pine Studio",
     version=PLATFORM_VERSION,
-    description="Multi-asset algorithmic trading research platform.",
+    description="Paste a TradingView Pine Script, plot it on the gold chart, backtest it.",
 )
 
 app.add_middleware(
@@ -28,10 +28,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(algorithms.router, prefix="/api")
-app.include_router(stocks.router, prefix="/api")
-app.include_router(backtest.router, prefix="/api")
-app.include_router(replay.router, prefix="/api")
+app.include_router(chart.router, prefix="/api")
+app.include_router(pine.router, prefix="/api")
 app.include_router(logs.router, prefix="/api")
 
 

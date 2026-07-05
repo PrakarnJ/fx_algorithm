@@ -1,240 +1,104 @@
-# FX Algorithm Platform
+# XAUUSD Pine Studio
 
-Multi-asset algorithmic trading research platform with a FastAPI backend, React frontend, and backtesting engine.
-
-**Best strategy (XAUUSD):** `regime_switch` — composite Donchian trend-follower + z-score mean-reversion router. Walk-forward OOS on real Dukascopy 2022–2026 data: **PF 1.77, 64% WR, Sharpe 2.38, +1,247 pts** over 131 trades. Backtested result only — see [Validation status](#validation-status).
-
-## How the platform works
+Paste a TradingView **Pine Script**, plot it on the **gold (XAUUSD)** chart, and backtest it — a single-instrument strategy studio with a TradingView-style Strategy Tester.
 
 ```
 ┌──────────────────────────────────────────────┐
-│  React frontend  (Vite · Tailwind · SWR)      │  :5173 (dev) / :8000 (prod)
-│  Dashboard · Backtest · Replay · Data · Logs  │
+│  React frontend  (Vite · Tailwind · CM6)      │  :5173 (dev) / :8000 (prod)
+│  Pine editor · chart · Strategy Tester        │
 └──────────────────┬───────────────────────────┘
-                   │  HTTP + WebSocket
+                   │  HTTP
 ┌──────────────────▼───────────────────────────┐
 │  FastAPI backend  (uvicorn · :8000)            │
-│  /api/algorithms  /api/backtest  /api/replay   │
-│  /api/stocks      /api/logs                    │
+│  /api/pine/validate  /api/pine/backtest        │
+│  /api/chart/data     /api/chart/info           │
 └──────────────────┬───────────────────────────┘
                    │
 ┌──────────────────▼───────────────────────────┐
-│  algorithms/  ← single source of truth        │
-│  7 strategies + registry + base               │
-│  backtest/engine  metrics  walkforward …      │
+│  pine/  — Pine Script subset engine           │
+│  lexer → parser → bar-by-bar interpreter      │
+│  → TV-style broker emulator → metrics         │
+│                                               │
+│  data/XAUUSD_{M15,H1,H4}.csv  (Dukascopy)     │
 └──────────────────────────────────────────────┘
 ```
 
-The **algorithms/** directory is the single source of truth — the backtest engine and the API both import from there.
-
-## How the best strategy works
-
-`regime_switch` detects the market **regime** and routes to the matching tactic:
-
-- **Trending** (ADX strong + Kaufman efficiency ratio high + price vs EMA200) → **Donchian breakout trend-follower**: enter with the move, ride it with an ATR trailing stop (no fixed TP).
-- **Ranging** (everything else, ~75% of the time) → **z-score mean-reversion** fade, or stand aside (current config rides trends only).
-
-The single most important lesson driving this design: **no one tactic works in all regimes.** Fade strategies print money in ranges and blow up in trends; trend-followers do the reverse.
-
-## Strategies tried (the honest journey)
-
-| Strategy | Data | OOS result | Verdict |
-|---|---|---|---|
-| Trend-Following (EMA crossover) | synthetic | negative expectancy | ❌ |
-| London Breakout (+ boosters) | synthetic | 62.5% WR, PF 2.02 | ⚠️ synthetic-only artifact |
-| Mean-reversion / RSI-fade / ML (8h Optuna campaign) | **real** | every finalist **PF < 0.5** | ❌ killed by 2025+ bull |
-| **Regime-Aware Switch** | **real** | **PF 1.77 walk-forward** | ✅ best |
-
-Full blow-by-blow in `STRATEGY_LOG.md`. Synthetic "winners" were fictions of the data generator; on real gold they lose.
-
-## Setup
-
-### Backend (Python)
+## Quick start
 
 ```bash
-python3 -m venv .venv
+# 1. Backend (project virtualenv; system pip is externally managed)
+python3 -m venv .venv                       # first time only
 .venv/bin/pip install -r requirements.txt
-```
+.venv/bin/python3 -m uvicorn api.main:app --port 8000
 
-### Frontend (Node.js)
+# 2. Frontend (dev)
+cd frontend && npm install && npm run dev   # → http://localhost:5173
+# or production: npm run build, then FastAPI serves the SPA at :8000
 
-```bash
-cd frontend
-npm install
-npm run dev          # Vite dev server → http://localhost:5173
-# npm run build      # production build → frontend/dist/ (served by FastAPI)
-```
-
-### Data
-
-Get real gold data via the free Dukascopy feed:
-
-```bash
-npx dukascopy-node -i xauusd -from 2022-01-01 -to 2026-06-13 -t m15 -f csv -dir /tmp/duka
-npx dukascopy-node -i xauusd -from 2022-01-01 -to 2026-06-13 -t h1  -f csv -dir /tmp/duka
-npx dukascopy-node -i xauusd -from 2022-01-01 -to 2026-06-13 -t h4  -f csv -dir /tmp/duka
+# 3. Data — real Dukascopy gold bars, or synthetic for offline testing
+.venv/bin/python3 data/generate_synthetic.py            # synthetic XAUUSD CSVs
+npx dukascopy-node -i xauusd -from 2020-01-01 -to 2026-07-01 -t m15 -f csv -dir /tmp/duka
+npx dukascopy-node -i xauusd -from 2020-01-01 -to 2026-07-01 -t h1  -f csv -dir /tmp/duka
+npx dukascopy-node -i xauusd -from 2020-01-01 -to 2026-07-01 -t h4  -f csv -dir /tmp/duka
 .venv/bin/python3 data/convert_dukascopy.py /tmp/duka   # → data/XAUUSD_{M15,H1,H4}.csv
 ```
 
-Or generate synthetic bars for pipeline testing (not a real edge):
+Open the Studio, paste a script, press **Run** (⌘⏎). Strategy scripts get entry/exit markers on the chart plus a Strategy Tester panel (Overview / Equity Curve / List of Trades); indicator scripts just plot.
 
-```bash
-.venv/bin/python3 data/generate_synthetic.py
-```
+## Supported Pine subset (v4–v6 syntax)
 
-Multi-asset data (AAPL, MSFT, SPY, BTCUSD, …) is downloaded via the web UI's **Data** page or:
+`//@version=4`, `5`, or `6` are all accepted — the core grammar this engine implements (`ta.*` namespace, `var`, `strategy.*`, arrays, functions) is unchanged across those releases. `//@version=3` and earlier use different built-in names (no `ta.` prefix, `study()` only) and are rejected at compile time with a clear message; `//@version=7`+ is rejected as newer than this engine supports.
 
-```bash
-.venv/bin/python3 -c "from data_pipeline.downloader import download; from config import STOCKS_DIR; download('XAUUSD', 'GC=F', ['M15','H1','H4'], STOCKS_DIR)"
-```
+| Area | Supported |
+|---|---|
+| Declarations | `indicator()`, `strategy()` (title, overlay, initial_capital, default_qty_type/value, commission_type/value, process_orders_on_close) |
+| Variables | `x = expr`, `var x = expr` (persistent), typed decls (`var float x`, `var array<float> a`), `x := expr`, `x += / -=`, `[a,b,c] = ta.macd(...)`, history `x[n]` |
+| Control flow | `if` / `else if` / `else`, `for i = a to b`, ternary `? :`, `and` `or` `not` |
+| Functions | user-defined `f(a, b) => expr` and indented-block bodies (last expression is the return value) |
+| Arrays | `array.new_*`, `push`, `size`, `shift`, `pop`, `get`, `set`, `clear`, `avg`, `sum`, `min`, `max` |
+| Series | `open high low close hl2 hlc3 ohlc4 volume bar_index time timeframe.period` |
+| `ta.*` | `sma ema rma rsi atr tr stdev highest lowest change mom crossover crossunder cross macd stoch pivotlow pivothigh` |
+| `math.*` | `abs sqrt log exp floor ceil sign max min round pow` |
+| Time | `time("D")` day buckets, `time(timeframe.period, "HHMM-HHMM", "Asia/Bangkok")` session filters (zoneinfo timezones) |
+| Misc | `na()`, `nz()`, `input.*()` (returns the default), `color.new()`, `str.tostring()` |
+| Plotting | `plot` (line/histogram/linebr), `plotshape`, `hline`; `bgcolor`/`fill`/`alertcondition` accepted but not rendered |
+| Strategy | `strategy.entry` (market/stop/limit — pending orders persist until filled or cancelled), `strategy.close(_all)`, `strategy.cancel(_all)`, `strategy.exit` (`stop`/`limit`/`loss`/`profit` in ticks), `strategy.position_size`, `strategy.position_avg_price`, `strategy.equity` |
 
-## Usage
+**Not supported (clear compile error):** `request.security` / higher timeframes, `pyramiding > 1`, `while`/`switch`, matrices, drawing objects (`line.*`, `label.*`, `box.*`, `table.*`), methods/types.
 
-### Web platform (API + frontend)
+See `examples/soldiers_sr_xauusd.pine` for a full real-world strategy (candlestick pattern + S/R pivot clustering + StochRSI + Fib SL/TP + session and daily-loss guards) that runs unmodified.
 
-```bash
-# Backend
-.venv/bin/python3 -m uvicorn api.main:app --reload --port 8000
+## Fill model (TradingView Strategy Tester emulation)
 
-# Frontend dev server (separate terminal)
-cd frontend && npm run dev
-# → open http://localhost:5173
-```
+- Orders placed on bar *i* execute on bar *i+1*; market orders fill at the **next bar's open**.
+- Stop/limit orders (entries and `strategy.exit`) fill intra-bar; when both a stop and a limit could fill in one bar, TV's documented path heuristic applies (open nearer high → open→high→low→close).
+- Single position (pyramiding = 1); an opposite `strategy.entry` reverses.
+- Commission charged per fill; sizing via `fixed` contracts, `percent_of_equity`, or `cash`.
+- Metrics mirror TV's Overview: Net Profit, Profit Factor, Max Drawdown (on the mark-to-market equity curve), % Profitable, Avg Trade/Win/Loss, Open P&L.
 
-Pages: **Dashboard** (rankings) · **Backtest** (run algo×symbol jobs) · **Replay** (bar-by-bar playback) · **Data** (download/manage CSVs) · **Logs** (live event stream)
+> **Honesty note:** results are *close to but not identical to* TradingView's tester — TV uses tick-level bar magnification and broker-emulator details we do not replicate. And as always: never ship a strategy tuned until the backtest looks good — reserve an out-of-sample window for the decision metrics.
 
-### Backtest pipeline (CLI)
-
-```bash
-.venv/bin/python3 backtest/smoke_test.py          # strategy sanity checks
-.venv/bin/python3 backtest/compare.py             # head-to-head: trend vs breakout
-.venv/bin/python3 backtest/walkforward.py --family all --trials 40  # rolling WFO
-.venv/bin/python3 backtest/campaign.py --budget-hours 8             # Optuna campaign
-```
-
-### Re-optimization (keep params fresh)
-
-```bash
-.venv/bin/python3 backtest/reoptimize.py                # optimize → propose
-.venv/bin/python3 backtest/reoptimize.py --no-download  # skip download step
-.venv/bin/python3 backtest/reoptimize.py --apply        # apply proposal to config
-```
-
-Writes `data/regime_params.json`; loaded by `config.py` at import time — delete to revert to hardcoded defaults.
-
-### Legacy Control Center (original dashboard)
-
-```bash
-.venv/bin/python3 backtest/export_report.py        # regenerate report/data.json
-.venv/bin/python3 backtest/dashboard_server.py --port 8765
-# → http://localhost:8765   tabs: #overview #performance #optimize #deploy
-```
-
-## Project layout
+## Repository layout
 
 ```
-config.py                     # symbol, SharedParams + all strategy params, REGIME_PARAMS
-indicators.py                 # EMA, RSI, ATR, ADX (Wilder)
-trade_manager.py              # break-even + ATR trailing SL (shared by engine)
-risk_manager.py               # lot sizing, drawdown guard (loss-streak pause, daily stop)
-
-algorithms/                   # ★ single source of truth for all strategies
-  base.py                     # Signal dataclass (with SL/TP validation), BaseStrategy
-  registry.py                 # AlgoManifest registry; TF_TO_FILE / TF_TO_YF maps
-  trend_following.py          # EMA(9/21) crossover + H4 bias + RSI filter
-  london_breakout.py          # Asian-range London open breakout
-  mean_reversion.py           # z-score fade (fixed TP/SL)
-  rsi_fade.py                 # RSI-extreme fade scalper
-  trend_breakout.py           # Donchian / MA-momentum with ATR trail
-  ml_classifier.py            # gradient-boosted TP-before-SL classifier
-  regime_switch.py            # ★ best: regime-aware composite
-
-api/                          # FastAPI backend
-  main.py                     # app, CORS, router mounts, static frontend serving
-  schemas.py                  # Pydantic v2 request/response models
-  runner.py                   # BacktestRunner: job queue + WS broadcast
-  replay_engine.py            # ReplaySession: pre-compute frames, stream over WS
-  routers/
-    algorithms.py             # GET /api/algorithms
-    backtest.py               # POST /api/backtest/run + WS /ws/backtest/{job_id}
-    replay.py                 # POST /api/replay/start + WS /ws/replay/{session_id}
-    stocks.py                 # CRUD + download for symbol data
-    logs.py                   # GET /api/logs
-
-frontend/src/                 # React + TypeScript + Tailwind (Vite)
-  pages/                      # DashboardPage · BacktestPage · ReplayPage · DataPage · LogsPage
-  components/backtest/        # RunConfigForm · ProgressFeed
-  components/replay/          # ChartPlayer · CandlestickChart · PlaybackControls
-  components/dashboard/       # RankingTable · MetricBadge
-  hooks/                      # useApi (SWR) · useReplayWebSocket
-  lib/api.ts                  # typed apiFetch wrapper + all API interfaces
-
-data_pipeline/
-  downloader.py               # yfinance download → CSV (H4 resampled from H1)
-  resampler.py                # H1 → H4 OHLC aggregation
-  capabilities.py             # check CSV exists + MIN_BARS threshold per TF
-
-stocks/
-  registry.yaml               # symbol metadata: name, tick_size, spread, yfinance_ticker
-  loader.py                   # load/query registry
-
-backtest/
-  engine.py                   # run_backtest_fast (vectorized) + run_backtest (reference) + replay_iter
-  regime.py                   # classify_regime: ADX + EMA200 + Kaufman ER
-  metrics.py                  # trade-frequency-aware Sharpe, PF, drawdown, R-multiples
-  walkforward.py              # rolling train→test WFO; stitched OOS + Monte-Carlo bands
-  montecarlo.py               # bootstrap robustness (CIs, skip-test, slippage)
-  reoptimize.py               # optimize → walk-forward → propose → apply
-  campaign.py                 # multi-family Optuna campaign (TRAIN/VAL/OOS)
-  compare.py / optimize.py / walk_forward.py / iterate.py   # original head-to-head pipeline
-  ml_features.py              # backward-looking features + TP-before-SL labels
-  smoke_test.py               # no-look-ahead, live/backtest parity, engine regression
-  export_report.py            # regenerate report/data.json
-  dashboard_server.py         # legacy Control Center (Overview/Performance/Optimize/Deploy)
-
-data/
-  XAUUSD_{M15,H1,H4}.csv     # real bars (gitignored; download via Dukascopy)
-  convert_dukascopy.py        # convert Dukascopy CSVs → pipeline format
-  generate_synthetic.py       # synthetic GBM bars (pipeline testing only)
-
-tests/
-  conftest.py                 # make_bars / make_dfs / StubStrategy fixtures
-  test_engine.py              # engine edge cases: partial TP, time-stop, costs, pause
-  test_indicators.py          # EMA / RSI / ATR / ADX correctness
-  test_signal.py              # Signal SL/TP validation
-
-report/                       # legacy dashboard static UI (served by dashboard_server.py)
+pine/                 # Pine Script engine
+  lexer.py            #   tokenizer (indentation-aware, line continuations)
+  parser.py           #   recursive descent → AST (subset gate w/ line:col errors)
+  interpreter.py      #   bar-by-bar series runtime, per-callsite ta state
+  builtins.py         #   incremental ta.* implementations + constants
+  tester.py           #   TV-style broker emulator + metrics
+  runner.py           #   compile → run → JSON-ready result; data loader
+api/                  # FastAPI: routers/pine.py, routers/chart.py, routers/logs.py
+frontend/             # React SPA: PineStudioPage (CodeMirror editor · chart · tester)
+data/                 # XAUUSD_{M15,H1,H4}.csv + synthetic generator + Dukascopy converter
+indicators.py         # vectorized pandas TA (reference implementations for ta.*)
+tests/                # pytest: parser, interpreter/ta parity, broker fills, indicators
 ```
-
-## Strategy interface
-
-Every strategy in `algorithms/` implements two entry points that must stay in sync:
-
-- `get_signal(dfs) → Signal | None` — incremental, used by the replay API on the latest bars.
-- `generate_signals(dfs) → DataFrame` — vectorized over all history, used by the fast backtest engine (~100× faster).
-
-`dfs` is a dict of UTC-indexed OHLC DataFrames keyed `"M15"`, `"H1"`, `"H4"`.
 
 ## Tests
 
 ```bash
-.venv/bin/python3 -m pytest tests/ -v          # 30 tests: engine, indicators, signal
-.venv/bin/python3 backtest/smoke_test.py       # strategy integration checks
+.venv/bin/python3 -m pytest tests/ -q
 ```
 
-## Backtest conventions
-
-- Profits in price points (1 pt = $0.01 on XAUUSD).
-- Spread applied to entry; SL checked before TP within the same bar (conservative fill).
-- No look-ahead: `generate_signals` uses only data available at signal time.
-- Walk-forward: parameters re-selected on each train window, evaluated on the next unseen test window; all segments stitched into one OOS curve.
-- Sharpe annualized by actual trade frequency (not a fixed √252 assumption).
-
-## Validation status
-
-**The best strategy is validated on real data via walk-forward — but NOT proven for live trading.**
-
-- Every decision metric comes from out-of-sample windows the optimizer never touched.
-- **2025+ is no longer a clean holdout** (this design was informed by seeing it). The only true test is forward data.
-- **Profit is tail-driven:** ~69% of the regime-switch's walk-forward profit came from a single 2026 trend window. Monte-Carlo p5 PF ≈ 1.03 — real edge, but fragile.
-- Synthetic data validates the *pipeline*, never a market edge.
+Covers: parser acceptance/rejection with error positions, interpreter semantics (`[n]`, `var`, crossover), `ta.*` parity against `indicators.py`, and broker-emulator fills (next-bar-open, SL/TP tick math, same-bar stop+limit path heuristic, reversal, commission, sizing) on hand-built bars with known outcomes.
