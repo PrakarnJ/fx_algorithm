@@ -109,3 +109,57 @@ class PineBacktestResponse(BaseModel):
     trades: List[TradeRecord] = []
     equity: List[Optional[float]] = []  # per-bar equity curve (strategy only)
     metrics: Optional[TesterMetrics] = None
+
+
+# ── Saved scripts ────────────────────────────────────────────────────────────
+
+class ScriptCreate(BaseModel):
+    name: str
+    source: str
+
+
+class ScriptUpdate(BaseModel):
+    name: Optional[str] = None
+    source: Optional[str] = None
+
+
+class ScriptMeta(BaseModel):
+    id: int
+    name: str
+    created_at: str
+    updated_at: str
+
+
+class ScriptDetail(ScriptMeta):
+    source: str
+
+
+class ScriptListResponse(BaseModel):
+    scripts: List[ScriptMeta]
+
+
+# ── Ranking ──────────────────────────────────────────────────────────────────
+
+class RankingRequest(BaseModel):
+    script_ids: List[int]
+    timeframe: str = "M15"              # M15 | H1 | H4
+    start_date: Optional[str] = None    # "YYYY-MM-DD"
+    end_date: Optional[str] = None      # "YYYY-MM-DD"
+
+
+class RankingItem(BaseModel):
+    script_id: int
+    name: str
+    ok: bool
+    title: Optional[str] = None
+    error: Optional[str] = None
+    metrics: Optional[TesterMetrics] = None
+
+
+class RankingResponse(BaseModel):
+    ok: bool = True
+    timeframe: str
+    bars: int
+    start: Optional[str] = None
+    end: Optional[str] = None
+    results: List[RankingItem]

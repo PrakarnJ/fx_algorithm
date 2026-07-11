@@ -4,12 +4,12 @@ Paste a TradingView **Pine Script**, plot it on the **gold (XAUUSD)** chart, and
 
 ```
 ┌──────────────────────────────────────────────┐
-│  React frontend  (Vite · Tailwind · CM6)      │  :5173 (dev) / :8000 (prod)
+│  React frontend  (Vite · Tailwind · CM6)      │  :5173 (dev) / :6001 (prod)
 │  Pine editor · chart · Strategy Tester        │
 └──────────────────┬───────────────────────────┘
                    │  HTTP
 ┌──────────────────▼───────────────────────────┐
-│  FastAPI backend  (uvicorn · :8000)            │
+│  FastAPI backend  (uvicorn · :6001)            │
 │  /api/pine/validate  /api/pine/backtest        │
 │  /api/chart/data     /api/chart/info           │
 └──────────────────┬───────────────────────────┘
@@ -29,11 +29,11 @@ Paste a TradingView **Pine Script**, plot it on the **gold (XAUUSD)** chart, and
 # 1. Backend (project virtualenv; system pip is externally managed)
 python3 -m venv .venv                       # first time only
 .venv/bin/pip install -r requirements.txt
-.venv/bin/python3 -m uvicorn api.main:app --port 8000
+.venv/bin/python3 -m uvicorn api.main:app --port 6001
 
 # 2. Frontend (dev)
 cd frontend && npm install && npm run dev   # → http://localhost:5173
-# or production: npm run build, then FastAPI serves the SPA at :8000
+# or production: npm run build, then FastAPI serves the SPA at :6001
 
 # 3. Data — real Dukascopy gold bars, or synthetic for offline testing
 .venv/bin/python3 data/generate_synthetic.py            # synthetic XAUUSD CSVs

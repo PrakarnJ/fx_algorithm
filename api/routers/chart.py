@@ -1,7 +1,10 @@
 """XAUUSD chart data — the only instrument this platform serves."""
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, HTTPException, Query
 
 import config
+from api.sync import read_marker
 from pine.runner import load_bars
 
 router = APIRouter(tags=["chart"])
@@ -10,7 +13,12 @@ router = APIRouter(tags=["chart"])
 @router.get("/chart/info")
 def chart_info():
     """Available timeframes and their bar counts / date ranges."""
-    out = {"symbol": config.SYMBOL, "timeframes": {}}
+    marker = read_marker()
+    out = {
+        "symbol": config.SYMBOL,
+        "last_synced": marker.get("last_synced") if marker else None,
+        "timeframes": {},
+    }
     for tf, fname in config.TF_TO_FILE.items():
         path = config.DATA_DIR / fname
         if not path.exists():
@@ -23,6 +31,8 @@ def chart_info():
             "bars": len(df),
             "start": str(df.index.min().date()) if len(df) else None,
             "end": str(df.index.max().date()) if len(df) else None,
+            "last_modified": datetime.fromtimestamp(
+                path.stat().st_mtime, tz=timezone.utc).isoformat(),
         }
     return out
 

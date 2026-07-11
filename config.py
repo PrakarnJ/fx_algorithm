@@ -8,6 +8,13 @@ FRONTEND_DIST = ROOT_DIR / "frontend" / "dist"
 
 SYMBOL = "XAUUSD"
 
+# SQLite store for saved Pine scripts (and future tables).
+DB_PATH = DATA_DIR / "pine_studio.db"
+
+# Guard against accidentally huge runs — M15 full history is ~150k bars,
+# the bar-by-bar interpreter handles ~10-20k bars/s.
+MAX_BARS = 200_000
+
 # Timeframe key → CSV filename in data/ (single source of truth for gold bars).
 TF_TO_FILE = {
     "M15": f"{SYMBOL}_M15.csv",

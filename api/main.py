@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from api.routers import chart, logs, pine
+from api.routers import chart, data_sync, logs, pine, ranking, scripts
 from config import FRONTEND_DIST
 
 PLATFORM_VERSION = "3.0.0"
@@ -31,6 +31,9 @@ app.add_middleware(
 app.include_router(chart.router, prefix="/api")
 app.include_router(pine.router, prefix="/api")
 app.include_router(logs.router, prefix="/api")
+app.include_router(scripts.router, prefix="/api")
+app.include_router(ranking.router, prefix="/api")
+app.include_router(data_sync.router, prefix="/api")
 
 
 @app.get("/api/health")

@@ -4,14 +4,11 @@ from fastapi import APIRouter, HTTPException
 from api.logger import log_event
 from api.schemas import (PineBacktestRequest, PineBacktestResponse, PineSource,
                          PineValidateResponse)
+from config import MAX_BARS
 from pine import PineCompileError, PineRuntimeError, compile_source, run
 from pine.runner import load_bars
 
 router = APIRouter(tags=["pine"])
-
-# Guard against accidentally huge runs — M15 full history is ~150k bars,
-# the bar-by-bar interpreter handles ~10-20k bars/s.
-MAX_BARS = 200_000
 
 
 @router.post("/pine/validate", response_model=PineValidateResponse)

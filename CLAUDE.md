@@ -11,8 +11,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 All Python runs use the project virtualenv (system pip is externally managed):
 
 ```bash
-.venv/bin/python3 -m pytest tests/ -q                    # full test suite
-.venv/bin/python3 -m uvicorn api.main:app --port 8000    # backend (serves built SPA too)
+.venv/bin/python3 -m pytest tests/ -q                     # full test suite
+.venv/bin/python3 -m pytest tests/test_pine_tester.py -q  # single test file
+.venv/bin/python3 -m pytest tests/ -k crossover -q        # single test by name (-k substring match)
+.venv/bin/python3 -m uvicorn api.main:app --port 6001     # backend (serves built SPA too)
 .venv/bin/python3 data/generate_synthetic.py             # synthetic XAUUSD CSVs for offline work
 .venv/bin/python3 data/convert_dukascopy.py <dir>        # real Dukascopy bars → data/
 cd frontend && npm run dev                               # frontend dev server on :5173
@@ -30,7 +32,10 @@ Smoke-test engine changes without the server: `from pine import compile_source, 
 - **Broker emulator matches TradingView, not the old repo conventions:** orders placed on bar i fill on bar i+1 (market = next open); stop+limit in the same bar resolve by TV's open-nearer-high path heuristic; single position, opposite entry reverses. Exact-fill tests in `tests/test_pine_tester.py` use hand-built bars — extend those when touching fills.
 - **Data:** `data/XAUUSD_{M15,H1,H4}.csv` is the single store (UTC-indexed `time,open,high,low,close`), loaded via `pine/runner.py:load_bars`. Timeframe map and XAUUSD cost defaults are in `config.py`.
 - **Frontend:** `PineChart.tsx` renders the backtest response (candles, plot series, shape markers, trade markers, hlines); `StrategyTester.tsx` is the TV-style Overview/Equity/Trades panel. Editor is CodeMirror 6.
+- **Dev backend port:** backend runs on `:6001` (not `:8000` — that port is occupied by an unrelated system service on this machine). `frontend/src/lib/api.ts` uses a relative `BASE_URL`; the Vite dev server proxies `/api` to `http://localhost:6001` (`frontend/vite.config.ts`). Start the backend before the frontend.
 
 **Conventions:** tick size 0.01 ($0.01 = 1 point on XAUUSD); `strategy.exit` `loss`/`profit` are in ticks. Backtest results approximate TradingView but are not tick-identical (no bar magnifier) — say so when reporting numbers.
 
 **Honest-validation policy:** never tune a script until the backtest looks good and call it done — reserve an out-of-sample window for decision metrics. Synthetic data validates the pipeline only, not a strategy edge.
+
+**Legacy:** `backtest/` and `strategies/` are vestigial (only `__pycache__` remains, no source) — the project pivoted to the Pine engine described above; don't build on them.

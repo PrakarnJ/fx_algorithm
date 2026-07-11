@@ -15,6 +15,9 @@ node_modules/
 
 # Data files — regenerate with generate_synthetic.py or convert_dukascopy.py
 data/*.csv
+data/*.db
+data/.sync_meta.json
+data/.dukascopy_cache/
 
 # Logs
 *.log
