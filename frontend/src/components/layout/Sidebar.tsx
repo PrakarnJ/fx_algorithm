@@ -1,10 +1,11 @@
 import { NavLink } from 'react-router-dom'
-import { CandlestickChart, ScrollText } from 'lucide-react'
+import { CandlestickChart, ScrollText, Trophy } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useVersion } from '@/hooks/useApi'
 
 const navItems = [
   { to: '/', label: 'Studio', icon: CandlestickChart, end: true },
+  { to: '/ranking', label: 'Ranking', icon: Trophy, end: false },
   { to: '/logs', label: 'Logs', icon: ScrollText, end: false },
 ]
 

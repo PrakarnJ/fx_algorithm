@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { Shell } from '@/components/layout/Shell'
 import { PineStudioPage } from '@/pages/PineStudioPage'
+import { RankingPage } from '@/pages/RankingPage'
 import { LogsPage } from '@/pages/LogsPage'
 
 function App() {
@@ -9,6 +10,7 @@ function App() {
       <Routes>
         <Route element={<Shell />}>
           <Route index element={<PineStudioPage />} />
+          <Route path="/ranking" element={<RankingPage />} />
           <Route path="/logs" element={<LogsPage />} />
         </Route>
       </Routes>

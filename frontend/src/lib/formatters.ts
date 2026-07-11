@@ -1,3 +1,9 @@
+export function fmtUsd(v: number | null | undefined, digits = 2): string {
+  if (v === null || v === undefined) return '—'
+  const sign = v < 0 ? '-' : ''
+  return `${sign}$${Math.abs(v).toFixed(digits)}`
+}
+
 export function formatDateTime(iso: string): string {
   try {
     const d = new Date(iso)

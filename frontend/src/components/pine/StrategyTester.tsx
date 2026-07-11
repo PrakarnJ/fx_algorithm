@@ -1,13 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { createChart, type IChartApi, type Time } from 'lightweight-charts'
 import type { PineBacktestResponse, TesterMetrics, TradeRecord } from '@/lib/api'
+import { fmtUsd } from '@/lib/formatters'
 import { cn } from '@/lib/utils'
-
-function fmtUsd(v: number | null | undefined, digits = 2): string {
-  if (v === null || v === undefined) return '—'
-  const sign = v < 0 ? '-' : ''
-  return `${sign}$${Math.abs(v).toFixed(digits)}`
-}
 
 function fmtTime(t: number | null): string {
   if (t === null) return '—'

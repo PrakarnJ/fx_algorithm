@@ -1,12 +1,19 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import CodeMirror from '@uiw/react-codemirror'
 import { javascript } from '@codemirror/lang-javascript'
 import { oneDark } from '@codemirror/theme-one-dark'
-import { Play, LoaderCircle } from 'lucide-react'
+import { FilePlus2, LoaderCircle, Pencil, Play, RefreshCw, Save, Trash2 } from 'lucide-react'
 import { PineChart } from '@/components/pine/PineChart'
 import { StrategyTester } from '@/components/pine/StrategyTester'
-import { useChartInfo } from '@/hooks/useApi'
-import { runPineBacktest, type PineBacktestResponse } from '@/lib/api'
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select'
+import { useChartInfo, useScripts, useSyncStatus } from '@/hooks/useApi'
+import {
+  createScript, deleteScript, getScript, runPineBacktest, startDataSync,
+  updateScript, type PineBacktestResponse,
+} from '@/lib/api'
+import { formatDateTime } from '@/lib/formatters'
 import { cn } from '@/lib/utils'
 
 const DEFAULT_SCRIPT = `//@version=6
@@ -31,23 +38,156 @@ if shortCond
 `
 
 const STORAGE_KEY = 'pine-studio-script'
+const SCRIPT_ID_KEY = 'pine-studio-script-id'
+const DRAFT = 'draft'
 const TIMEFRAMES = ['M15', 'H1', 'H4']
 
 export function PineStudioPage() {
   const [source, setSource] = useState<string>(
     () => localStorage.getItem(STORAGE_KEY) ?? DEFAULT_SCRIPT,
   )
-  const [timeframe, setTimeframe] = useState('H1')
+  const [timeframe, setTimeframe] = useState('M15')
   const [startDate, setStartDate] = useState('2025-01-01')
   const [endDate, setEndDate] = useState('')
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState<PineBacktestResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const { data: info } = useChartInfo()
+
+  // Saved-script state: which DB script is loaded + its source at load/save time
+  const [activeScriptId, setActiveScriptId] = useState<number | null>(() => {
+    const raw = localStorage.getItem(SCRIPT_ID_KEY)
+    return raw ? Number(raw) : null
+  })
+  const [loadedSnapshot, setLoadedSnapshot] = useState<string | null>(null)
+  const [scriptBusy, setScriptBusy] = useState(false)
+
+  const { data: info, mutate: mutateInfo } = useChartInfo()
+  const { data: scriptList, mutate: mutateScripts } = useScripts()
+  const { data: syncStatus, mutate: mutateSync } = useSyncStatus()
+  const syncRunning = syncStatus?.status === 'running'
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, source)
   }, [source])
+
+  useEffect(() => {
+    if (activeScriptId === null) localStorage.removeItem(SCRIPT_ID_KEY)
+    else localStorage.setItem(SCRIPT_ID_KEY, String(activeScriptId))
+  }, [activeScriptId])
+
+  // On mount: restore the loaded-script snapshot so the dirty dot is accurate
+  useEffect(() => {
+    if (activeScriptId === null) return
+    getScript(activeScriptId)
+      .then((s) => setLoadedSnapshot(s.source))
+      .catch(() => setActiveScriptId(null))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Refresh chart info when a sync finishes
+  const prevSyncStatus = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    if (prevSyncStatus.current === 'running' && syncStatus?.status !== 'running') {
+      void mutateInfo()
+    }
+    prevSyncStatus.current = syncStatus?.status
+  }, [syncStatus?.status, mutateInfo])
+
+  const dirty = activeScriptId !== null && loadedSnapshot !== null && source !== loadedSnapshot
+  const activeScript = scriptList?.scripts.find((s) => s.id === activeScriptId)
+
+  const loadScript = async (value: string) => {
+    if (value === DRAFT) {
+      setActiveScriptId(null)
+      setLoadedSnapshot(null)
+      return
+    }
+    try {
+      const s = await getScript(Number(value))
+      setSource(s.source)
+      setActiveScriptId(s.id)
+      setLoadedSnapshot(s.source)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  const saveAs = async () => {
+    let name = window.prompt('Script name')
+    while (name !== null) {
+      try {
+        const s = await createScript(name, source)
+        setActiveScriptId(s.id)
+        setLoadedSnapshot(source)
+        await mutateScripts()
+        return
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        name = window.prompt(
+          msg.includes('409') ? `"${name}" already exists — pick another name` : msg,
+          name,
+        )
+      }
+    }
+  }
+
+  const save = async () => {
+    setScriptBusy(true)
+    try {
+      if (activeScriptId === null) {
+        await saveAs()
+      } else {
+        await updateScript(activeScriptId, { source })
+        setLoadedSnapshot(source)
+        await mutateScripts()
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setScriptBusy(false)
+    }
+  }
+
+  const rename = async () => {
+    if (activeScriptId === null || !activeScript) return
+    const name = window.prompt('New name', activeScript.name)
+    if (!name || name === activeScript.name) return
+    try {
+      await updateScript(activeScriptId, { name })
+      await mutateScripts()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  const remove = async () => {
+    if (activeScriptId === null || !activeScript) return
+    if (!window.confirm(`Delete script "${activeScript.name}"?`)) return
+    try {
+      await deleteScript(activeScriptId)
+      setActiveScriptId(null)
+      setLoadedSnapshot(null)
+      await mutateScripts()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  const sync = async () => {
+    if (syncRunning) return
+    if (!info?.last_synced) {
+      const ok = window.confirm(
+        'First sync replaces the current (synthetic) data with full real Dukascopy history — a multi-year M15 download that takes several minutes. Continue?',
+      )
+      if (!ok) return
+    }
+    try {
+      await startDataSync('auto')
+      await mutateSync()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
 
   const run = useCallback(async () => {
     setRunning(true)
@@ -89,6 +229,41 @@ export function PineStudioPage() {
     <div className="flex flex-col h-screen">
       {/* Toolbar */}
       <div className="flex items-center gap-3 px-4 py-2 border-b border-card-border">
+        {/* Saved scripts */}
+        <div className="flex items-center gap-1">
+          <Select value={activeScriptId !== null ? String(activeScriptId) : DRAFT}
+                  onValueChange={(v) => void loadScript(v)}>
+            <SelectTrigger className="w-44 h-8 text-xs font-mono">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={DRAFT} className="text-xs font-mono">— draft —</SelectItem>
+              {scriptList?.scripts.map((s) => (
+                <SelectItem key={s.id} value={String(s.id)} className="text-xs font-mono">
+                  {s.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {dirty && <span className="text-accent text-lg leading-none" title="Unsaved changes">●</span>}
+          <button onClick={() => void save()} disabled={scriptBusy} title="Save (updates the selected script)"
+                  className="p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-secondary disabled:opacity-50">
+            <Save className="h-4 w-4" />
+          </button>
+          <button onClick={() => void saveAs()} title="Save as new script"
+                  className="p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-secondary">
+            <FilePlus2 className="h-4 w-4" />
+          </button>
+          <button onClick={() => void rename()} disabled={activeScriptId === null} title="Rename script"
+                  className="p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-secondary disabled:opacity-30">
+            <Pencil className="h-4 w-4" />
+          </button>
+          <button onClick={() => void remove()} disabled={activeScriptId === null} title="Delete script"
+                  className="p-1.5 rounded text-muted-foreground hover:text-red-400 hover:bg-secondary disabled:opacity-30">
+            <Trash2 className="h-4 w-4" />
+          </button>
+        </div>
+
         <span className="font-mono text-sm font-bold text-accent">XAUUSD</span>
         <div className="flex rounded-md border border-card-border overflow-hidden">
           {TIMEFRAMES.map((tf) => (
@@ -124,6 +299,30 @@ export function PineStudioPage() {
             {tfInfo.bars.toLocaleString()} bars · {tfInfo.start} → {tfInfo.end}
           </span>
         )}
+
+        {/* Data sync */}
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => void sync()}
+            disabled={syncRunning}
+            title="Sync XAUUSD data from Dukascopy"
+            className="flex items-center gap-1.5 px-2 py-1 rounded border border-card-border text-xs
+                       text-muted-foreground hover:text-foreground hover:bg-secondary disabled:opacity-50"
+          >
+            <RefreshCw className={cn('h-3.5 w-3.5', syncRunning && 'animate-spin')} />
+            {syncRunning ? 'Syncing…' : 'Sync'}
+          </button>
+          <span className="text-xs font-mono text-muted-foreground">
+            {syncRunning
+              ? syncStatus?.step
+              : syncStatus?.status === 'error'
+                ? <span className="text-red-400" title={syncStatus.error ?? ''}>sync failed</span>
+                : info?.last_synced
+                  ? `synced ${formatDateTime(info.last_synced)}`
+                  : 'never synced'}
+          </span>
+        </div>
+
         <button
           onClick={() => void run()}
           disabled={running}

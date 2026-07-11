@@ -1,4 +1,5 @@
-export const BASE_URL = 'http://localhost:8000'
+// Relative in dev (proxied by Vite, see vite.config.ts) and in prod (FastAPI serves the SPA on the same origin).
+export const BASE_URL = ''
 
 export async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
@@ -23,7 +24,13 @@ export interface OHLCBar {
 
 export interface ChartInfo {
   symbol: string
-  timeframes: Record<string, { bars: number; start: string | null; end: string | null }>
+  last_synced: string | null
+  timeframes: Record<string, {
+    bars: number
+    start: string | null
+    end: string | null
+    last_modified: string
+  }>
 }
 
 // ── Pine backtest ─────────────────────────────────────────────────────────────
@@ -113,6 +120,89 @@ export function runPineBacktest(req: PineBacktestRequest): Promise<PineBacktestR
     method: 'POST',
     body: JSON.stringify(req),
   })
+}
+
+// ── saved scripts ─────────────────────────────────────────────────────────────
+
+export interface ScriptMeta {
+  id: number
+  name: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ScriptDetail extends ScriptMeta {
+  source: string
+}
+
+export function listScripts(): Promise<{ scripts: ScriptMeta[] }> {
+  return apiFetch('/api/scripts')
+}
+
+export function getScript(id: number): Promise<ScriptDetail> {
+  return apiFetch(`/api/scripts/${id}`)
+}
+
+export function createScript(name: string, source: string): Promise<ScriptDetail> {
+  return apiFetch('/api/scripts', { method: 'POST', body: JSON.stringify({ name, source }) })
+}
+
+export function updateScript(
+  id: number,
+  patch: { name?: string; source?: string },
+): Promise<ScriptDetail> {
+  return apiFetch(`/api/scripts/${id}`, { method: 'PUT', body: JSON.stringify(patch) })
+}
+
+export function deleteScript(id: number): Promise<{ ok: boolean }> {
+  return apiFetch(`/api/scripts/${id}`, { method: 'DELETE' })
+}
+
+// ── ranking ───────────────────────────────────────────────────────────────────
+
+export interface RankingRequest {
+  script_ids: number[]
+  timeframe: string
+  start_date?: string | null
+  end_date?: string | null
+}
+
+export interface RankingItem {
+  script_id: number
+  name: string
+  ok: boolean
+  title: string | null
+  error: string | null
+  metrics: TesterMetrics | null
+}
+
+export interface RankingResponse {
+  ok: boolean
+  timeframe: string
+  bars: number
+  start: string | null
+  end: string | null
+  results: RankingItem[]
+}
+
+export function runRanking(req: RankingRequest): Promise<RankingResponse> {
+  return apiFetch('/api/ranking/run', { method: 'POST', body: JSON.stringify(req) })
+}
+
+// ── data sync ─────────────────────────────────────────────────────────────────
+
+export interface SyncStatus {
+  status: 'idle' | 'running' | 'done' | 'error'
+  mode: 'full' | 'incremental' | null
+  step: string | null
+  started_at: string | null
+  finished_at: string | null
+  error: string | null
+  last_synced: string | null
+}
+
+export function startDataSync(mode: 'auto' | 'full' = 'auto'): Promise<{ status: string; mode: string }> {
+  return apiFetch('/api/data/sync', { method: 'POST', body: JSON.stringify({ mode }) })
 }
 
 // ── logs ──────────────────────────────────────────────────────────────────────
