@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createChart, type IChartApi, type Time } from 'lightweight-charts'
 import type { PineBacktestResponse, TesterMetrics, TradeRecord } from '@/lib/api'
-import { fmtUsd } from '@/lib/formatters'
+import { fmtLots, fmtUsd } from '@/lib/formatters'
 import { cn } from '@/lib/utils'
 
 function fmtTime(t: number | null): string {
@@ -103,7 +103,7 @@ function TradeList({ trades }: { trades: TradeRecord[] }) {
             <th className="text-left px-3 py-2">Exit</th>
             <th className="text-right px-3 py-2">Entry px</th>
             <th className="text-right px-3 py-2">Exit px</th>
-            <th className="text-right px-3 py-2">Qty</th>
+            <th className="text-right px-3 py-2">Lots</th>
             <th className="text-right px-3 py-2">P&L</th>
             <th className="text-right px-3 py-2">P&L %</th>
             <th className="text-left px-3 py-2">Reason</th>
@@ -121,7 +121,7 @@ function TradeList({ trades }: { trades: TradeRecord[] }) {
               <td className="px-3 py-1.5">{fmtTime(t.exit_time)}</td>
               <td className="px-3 py-1.5 text-right">{t.entry_price.toFixed(2)}</td>
               <td className="px-3 py-1.5 text-right">{t.exit_price?.toFixed(2) ?? '—'}</td>
-              <td className="px-3 py-1.5 text-right">{t.qty}</td>
+              <td className="px-3 py-1.5 text-right" title={`${t.qty} oz`}>{fmtLots(t.qty)}</td>
               <td className={cn('px-3 py-1.5 text-right font-semibold',
                 (t.profit ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400')}>
                 {fmtUsd(t.profit)}

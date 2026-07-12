@@ -13,7 +13,7 @@ import {
   createScript, deleteScript, getScript, runPineBacktest, startDataSync,
   updateScript, type PineBacktestResponse,
 } from '@/lib/api'
-import { formatDateTime } from '@/lib/formatters'
+import { formatDateTime, OZ_PER_LOT } from '@/lib/formatters'
 import { cn } from '@/lib/utils'
 
 const DEFAULT_SCRIPT = `//@version=6
@@ -21,6 +21,8 @@ strategy("EMA Cross", overlay=true, initial_capital=100000, default_qty_value=10
 
 fastLen = input.int(9, title="Fast EMA")
 slowLen = input.int(21, title="Slow EMA")
+slTicks = input.int(500, title="Stop loss (ticks)")
+tpTicks = input.int(1000, title="Take profit (ticks)")
 
 fast = ta.ema(close, fastLen)
 slow = ta.ema(close, slowLen)
@@ -35,10 +37,13 @@ if longCond
     strategy.entry("L", strategy.long)
 if shortCond
     strategy.entry("S", strategy.short)
+
+strategy.exit("x", loss=slTicks, profit=tpTicks)
 `
 
 const STORAGE_KEY = 'pine-studio-script'
 const SCRIPT_ID_KEY = 'pine-studio-script-id'
+const LOTS_KEY = 'pine-studio-lots'
 const DRAFT = 'draft'
 const TIMEFRAMES = ['M15', 'H1', 'H4']
 
@@ -47,6 +52,10 @@ export function PineStudioPage() {
     () => localStorage.getItem(STORAGE_KEY) ?? DEFAULT_SCRIPT,
   )
   const [timeframe, setTimeframe] = useState('M15')
+  const [lots, setLots] = useState<number>(() => {
+    const v = parseFloat(localStorage.getItem(LOTS_KEY) ?? '')
+    return Number.isFinite(v) && v > 0 ? v : 0.01
+  })
   const [startDate, setStartDate] = useState('2025-01-01')
   const [endDate, setEndDate] = useState('')
   const [running, setRunning] = useState(false)
@@ -198,6 +207,7 @@ export function PineStudioPage() {
         timeframe,
         start_date: startDate || null,
         end_date: endDate || null,
+        settings: { default_qty_type: 'fixed', default_qty_value: lots * OZ_PER_LOT },
       })
       setResult(res)
       if (!res.ok && res.errors.length > 0) {
@@ -209,7 +219,7 @@ export function PineStudioPage() {
     } finally {
       setRunning(false)
     }
-  }, [source, timeframe, startDate, endDate])
+  }, [source, timeframe, startDate, endDate, lots])
 
   // Ctrl/Cmd+Enter runs the script
   useEffect(() => {
@@ -294,6 +304,24 @@ export function PineStudioPage() {
           onChange={(e) => setEndDate(e.target.value)}
           className="bg-secondary border border-card-border rounded px-2 py-1 text-xs font-mono"
         />
+        <label className="flex items-center gap-1.5 text-xs text-muted-foreground font-mono"
+               title="0.01 lot = 1 oz ≈ $0.10 per pip. Applies to entries without an explicit qty= in the script.">
+          Lots
+          <input
+            type="number"
+            min={0.01}
+            step={0.01}
+            value={lots}
+            onChange={(e) => {
+              const v = parseFloat(e.target.value)
+              if (Number.isFinite(v) && v > 0) {
+                setLots(v)
+                localStorage.setItem(LOTS_KEY, String(v))
+              }
+            }}
+            className="w-16 bg-secondary border border-card-border rounded px-2 py-1 text-xs font-mono text-foreground"
+          />
+        </label>
         {tfInfo && (
           <span className="text-xs text-muted-foreground font-mono">
             {tfInfo.bars.toLocaleString()} bars · {tfInfo.start} → {tfInfo.end}

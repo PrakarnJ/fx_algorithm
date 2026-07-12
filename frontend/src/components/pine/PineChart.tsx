@@ -10,6 +10,7 @@ import {
   type LineData,
   type HistogramData,
   type Time,
+  type WhitespaceData,
 } from 'lightweight-charts'
 import type { PineBacktestResponse } from '@/lib/api'
 
@@ -153,6 +154,27 @@ export function PineChart({ result }: Props) {
       })
       s.setData(times.map((t) => ({ time: t, value: hl.price })))
       bucket.push(s)
+    }
+
+    // strategy.exit() SL/TP levels — dashed step lines while a position is open
+    if (result.exit_levels) {
+      const levels: Array<{ values: (number | null)[]; color: string; title: string }> = [
+        { values: result.exit_levels.stop, color: '#ef4444', title: 'SL' },
+        { values: result.exit_levels.limit, color: '#22c55e', title: 'TP' },
+      ]
+      for (const { values, color, title } of levels) {
+        if (!values.some((v) => v !== null)) continue
+        const s = pc.addLineSeries({
+          color, title, lineWidth: 1, lineStyle: 2, lineType: 1,
+          priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+        })
+        // whitespace points (no value) break the line between trades
+        s.setData(times.map((t, i): LineData | WhitespaceData => {
+          const v = values[i]
+          return v !== null && isFinite(v) ? { time: t, value: v } : { time: t }
+        }))
+        dynamicSeries.current.push(s)
+      }
     }
 
     // markers: plotshape() + trade entries/exits

@@ -78,6 +78,11 @@ export interface TradeRecord {
   exit_reason: string
 }
 
+export interface ExitLevels {
+  stop: (number | null)[]
+  limit: (number | null)[]
+}
+
 export interface TesterMetrics {
   net_profit: number
   net_profit_pct: number
@@ -105,7 +110,16 @@ export interface PineBacktestResponse {
   hlines: HLine[]
   trades: TradeRecord[]
   equity: (number | null)[]
+  exit_levels: ExitLevels | null
   metrics: TesterMetrics | null
+}
+
+export interface TesterSettingsOverride {
+  initial_capital?: number
+  default_qty_type?: string
+  default_qty_value?: number
+  commission_type?: string
+  commission_value?: number
 }
 
 export interface PineBacktestRequest {
@@ -113,6 +127,7 @@ export interface PineBacktestRequest {
   timeframe: string
   start_date?: string | null
   end_date?: string | null
+  settings?: TesterSettingsOverride | null
 }
 
 export function runPineBacktest(req: PineBacktestRequest): Promise<PineBacktestResponse> {
