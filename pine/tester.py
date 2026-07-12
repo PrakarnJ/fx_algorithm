@@ -93,6 +93,9 @@ class Broker:
         self.realized = 0.0                    # cumulative net P&L (currency)
         self.equity_curve: list[float] = []
         self.size_history: list[float] = []    # position_size as seen by the script each bar
+        # Active strategy.exit levels per bar (NaN when flat or no rule) — for chart overlay
+        self.sl_history: list[float] = []
+        self.tp_history: list[float] = []
 
         # Orders queued during the current bar → active next bar
         self._queued_entries: list[EntryOrder] = []
@@ -182,8 +185,16 @@ class Broker:
             self._fill_entry(i, order, fill_price)
 
         # 3. Exit rules (stop-loss / take-profit) on the open position
+        sl = tp = NAN
         if self.position is not None:
-            self._check_exit_rules(i, o, h, l)
+            rule = self._active_exit_rule()
+            if rule is not None:
+                stop, limit = self._exit_levels(rule)
+                sl = NAN if stop is None else stop
+                tp = NAN if limit is None else limit
+                self._check_exit_rules(i, o, h, l, stop, limit)
+        self.sl_history.append(sl)
+        self.tp_history.append(tp)
 
         # Record what strategy.position_size reads during this bar's script run
         self.size_history.append(self.position_size)
@@ -272,16 +283,16 @@ class Broker:
             return s.commission_value
         return 0.0
 
-    def _check_exit_rules(self, i: int, o, h, l) -> None:
-        pos = self.position
-        rule = None
+    def _active_exit_rule(self) -> Optional[ExitRule]:
         for r in self._exits:
-            if r.from_entry in ("", pos.entry_id):
-                rule = r
-                break
-        if rule is None:
-            return
+            if r.from_entry in ("", self.position.entry_id):
+                return r
+        return None
 
+    def _exit_levels(self, rule: ExitRule) -> tuple[Optional[float], Optional[float]]:
+        """Resolve a rule's stop/limit prices for the current position
+        (loss/profit tick offsets are relative to the entry price)."""
+        pos = self.position
         sign = 1.0 if pos.direction == "long" else -1.0
         stop = rule.stop
         limit = rule.limit
@@ -289,6 +300,12 @@ class Broker:
             stop = pos.entry_price - sign * rule.loss_ticks * self.s.tick_size
         if rule.profit_ticks is not None:
             limit = pos.entry_price + sign * rule.profit_ticks * self.s.tick_size
+        return stop, limit
+
+    def _check_exit_rules(self, i: int, o, h, l,
+                          stop: Optional[float], limit: Optional[float]) -> None:
+        pos = self.position
+        sign = 1.0 if pos.direction == "long" else -1.0
 
         stop_hit = stop is not None and (l <= stop if sign > 0 else h >= stop)
         limit_hit = limit is not None and (h >= limit if sign > 0 else l <= limit)

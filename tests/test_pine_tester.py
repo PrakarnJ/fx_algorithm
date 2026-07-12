@@ -61,6 +61,43 @@ def test_take_profit_limit_fill():
     assert t["profit"] == pytest.approx(2.0)
 
 
+def test_exit_levels_recorded_per_bar():
+    # Levels appear the bar the entry fills and persist through the exit bar.
+    df = make_custom_bars([
+        (100.0, 100.5, 99.5, 100.0),   # bar 0: signal — flat, no levels
+        (100.0, 100.4, 99.8, 100.2),   # bar 1: entry fills at 100.0 → SL 99, TP 102
+        (100.1, 100.5, 99.9, 100.3),   # bar 2: position open, levels persist
+        (100.0, 100.5, 98.5, 98.8),    # bar 3: stop 99.0 hits — levels shown on exit bar
+        (99.0, 99.5, 98.5, 99.2),      # bar 4: flat again
+    ])
+    res = run_strategy(
+        "if bar_index == 0\n"
+        "    strategy.entry(\"L\", strategy.long, qty=1)\n"
+        "    strategy.exit(\"x\", from_entry=\"L\", loss=100, profit=200)", df)
+    assert res["trades"][0]["exit_reason"] == "stop"
+    lv = res["exit_levels"]
+    assert lv["stop"] == [None, pytest.approx(99.0), pytest.approx(99.0),
+                          pytest.approx(99.0), None]
+    assert lv["limit"] == [None, pytest.approx(102.0), pytest.approx(102.0),
+                           pytest.approx(102.0), None]
+
+
+def test_exit_levels_only_side_provided():
+    # Only a stop-loss: TP stays null while SL is live.
+    df = make_custom_bars([
+        (100.0, 100.5, 99.5, 100.0),
+        (100.0, 100.4, 99.8, 100.2),   # entry at 100 → SL 99
+        (100.1, 100.4, 99.9, 100.3),
+    ])
+    res = run_strategy(
+        "if bar_index == 0\n"
+        "    strategy.entry(\"L\", strategy.long, qty=1)\n"
+        "    strategy.exit(\"x\", from_entry=\"L\", loss=100)", df)
+    lv = res["exit_levels"]
+    assert lv["stop"] == [None, pytest.approx(99.0), pytest.approx(99.0)]
+    assert lv["limit"] == [None, None, None]
+
+
 def test_stop_and_limit_same_bar_uses_path_heuristic():
     # Both stop (99) and limit (101) inside bar 2's range.
     # open 100.2 is nearer the high (100.9) than the low (98.5)
@@ -186,3 +223,4 @@ def test_indicator_script_has_no_tester():
     res = run(compile_source(src), df)
     assert res["metrics"] is None
     assert res["trades"] == []
+    assert res["exit_levels"] is None

@@ -1,0 +1,240 @@
+//@version=6
+// ============================================================
+//  Fibo SL/TP (Reversal) — XAUUSD
+//  Entry: 2-soldiers กลับตัว + StochRSI momentum (mirror ฝั่ง short)
+//  Fib retracement วาดจาก "จุดเริ่ม" (swing start) ไปยัง swing ก่อนหน้า:
+//    Long : 0 = swing low (จุดเริ่ม), 1.0 = previous swing high
+//    Short: 0 = swing high (จุดเริ่ม), 1.0 = previous swing low
+//  กติกา SL/TP (ปรับได้ผ่าน inputs กลุ่ม TP/SL Ladder):
+//    TP Mode "Fib adaptive" (default): เลือก extension ต่ำสุดจาก {1.236,1.382,1.5,1.618}
+//      ที่ reward ≥ minRR × ระยะ SL (exit engine port มาจากสคริปต์ Breakout;
+//      ตัว entry Reversal เองยังไม่เคยพิสูจน์ edge — ดู memory/validation)
+//    โหมดอื่น: "Fib extension" (TP คงที่) | "ATR x" | "Fixed pips"
+//    แตะ BE trigger      → เลื่อน SL ไป break-even
+//    แตะ SL-lock trigger → เลื่อน SL ไปที่ SL-lock target
+//  Sizing: Micro Lot 0.01 = 1 oz (qty 1) → $0.10 ต่อ pip ($0.10 move)
+// ============================================================
+strategy("Fibo SL/TP Reversal — XAUUSD",
+     shorttitle = "FIB-REV",
+     overlay = true,
+     pyramiding = 0,
+     initial_capital = 1000,
+     default_qty_value = 1)
+
+// ============================================================
+// INPUTS
+// ============================================================
+grpEntry = "═══ Entry ═══"
+minBodyPct = input.float(50.0, "Body ขั้นต่ำ (% ของ range แท่ง)", minval = 0, maxval = 100, group = grpEntry)
+
+grpFib = "═══ Fib Anchors ═══"
+lookback  = input.int(10, "Swing lookback (จุดเริ่ม)", minval = 5, group = grpFib)
+pivLeft   = input.int(5, "Pivot Left",  minval = 2, group = grpFib)
+pivRight  = input.int(5, "Pivot Right", minval = 2, group = grpFib)
+
+grpFilter = "═══ Setup Filters ═══"
+atrLen      = input.int(14, "ATR Length", minval = 1, group = grpFilter)
+minRangeATR = input.float(1.5, "ระยะ fib ขั้นต่ำ (x ATR)", minval = 0.1, step = 0.1, group = grpFilter)
+maxEntryFib = input.float(0.382, "ตำแหน่ง entry สูงสุดใน fib range", minval = 0.1, maxval = 0.6, group = grpFilter)
+// minRR เป็นตัวคัดเทรดหลักของโหมด Fib adaptive; ถ้าสลับไปโหมด TP อื่น ควรลดลงมา ~1.0
+minRR       = input.float(6.0, "R:R ขั้นต่ำ", minval = 0.1, step = 0.1, group = grpFilter)
+
+// TP มี 4 โหมด (โหมดที่อิง entry ใช้ ladder เป็น % ของระยะ TP):
+//  - "Fib adaptive": เลือก extension ต่ำสุดจาก {1.236, 1.382, 1.5, 1.618}
+//    ที่ reward ≥ minRR × ระยะ SL — SL แคบ → TP ใกล้ (โดนบ่อยขึ้น), SL กว้าง → TP ไกล
+//  - "Fib extension": TP คงที่ที่ tpFib
+//  - "ATR x": TP = entry ± atrTpMult × ATR
+//  - "Fixed pips": TP = entry ± tpPips (1 pip = $0.10)
+grpLadder = "═══ TP/SL Ladder ═══"
+tpMode    = input.string("Fib adaptive", "TP Mode", options = ["Fib adaptive", "Fib extension", "ATR x", "Fixed pips"], group = grpLadder)
+atrTpMult = input.float(2.0, "TP (x ATR จาก entry)", minval = 0.5, step = 0.5, group = grpLadder)
+tpPips    = input.float(100, "TP (pips จาก entry, 1 pip = $0.10)", minval = 10, step = 10, group = grpLadder)
+beTrigPct = input.float(50, "BE trigger (% ของระยะ TP)", minval = 5, maxval = 95, group = grpLadder)
+lkTrigPct = input.float(75, "SL-lock trigger (% ของระยะ TP)", minval = 10, maxval = 99, group = grpLadder)
+lkToPct   = input.float(50, "SL-lock target (% ของระยะ TP)", minval = 0, maxval = 95, group = grpLadder)
+tpFib     = input.float(1.618, "TP fib level", minval = 0.1, step = 0.001, group = grpLadder)
+beTrigFib = input.float(0.5, "BE trigger fib", minval = 0.05, step = 0.001, group = grpLadder)
+lkTrigFib = input.float(1.0, "SL-lock trigger fib", minval = 0.05, step = 0.001, group = grpLadder)
+lkToFib   = input.float(0.618, "SL-lock target fib", minval = 0.0, step = 0.001, group = grpLadder)
+
+grpSL = "═══ Initial SL ═══"
+slMode  = input.string("Swing + ATR buffer", "Initial SL Mode",
+                 options = ["Swing + ATR buffer", "Swing", "Fixed ticks"], group = grpSL)
+atrBuf  = input.float(1.0, "SL ATR buffer (x ATR)", minval = 0.0, step = 0.1, group = grpSL)
+slTicks = input.int(500, "Fixed SL (ticks)", minval = 10, group = grpSL)
+beBufPts = input.float(20, "BE buffer (points)", minval = 0, group = grpSL)
+
+// ============================================================
+// INDICATORS (top-level เสมอ — per-callsite ta.* state ต้องรันทุกแท่ง)
+// ============================================================
+atr = ta.atr(atrLen)
+
+pipSize = 10 * syminfo.mintick   // 1 pip = $0.10 บน XAUUSD
+isFibTP = tpMode == "Fib adaptive" or tpMode == "Fib extension"
+// ระยะ TP จาก entry (โหมดที่ไม่ใช่ fib) — ATR ณ แท่งที่คำนวณ
+tpDist  = tpMode == "ATR x" ? atrTpMult * atr : tpPips * pipSize
+
+// Fib adaptive: extension ต่ำสุดที่ให้ reward ≥ rr × risk (na = ไม่มีระดับไหนพอ → ไม่เทรด)
+pickTpLong(base, rng, entryPx, risk, rr) =>
+    t1 = base + 1.236 * rng
+    t2 = base + 1.382 * rng
+    t3 = base + 1.5 * rng
+    t4 = base + 1.618 * rng
+    t1 - entryPx >= rr * risk ? t1 :
+         t2 - entryPx >= rr * risk ? t2 :
+         t3 - entryPx >= rr * risk ? t3 :
+         t4 - entryPx >= rr * risk ? t4 : na
+
+pickTpShort(base, rng, entryPx, risk, rr) =>
+    t1 = base - 1.236 * rng
+    t2 = base - 1.382 * rng
+    t3 = base - 1.5 * rng
+    t4 = base - 1.618 * rng
+    entryPx - t1 >= rr * risk ? t1 :
+         entryPx - t2 >= rr * risk ? t2 :
+         entryPx - t3 >= rr * risk ? t3 :
+         entryPx - t4 >= rr * risk ? t4 : na
+
+rsiVal = ta.rsi(close, 14)
+kRaw   = ta.stoch(rsiVal, rsiVal, rsiVal, 14)
+k      = ta.sma(kRaw, 3)
+d      = ta.sma(k, 3)
+bullMomentum = k > 50 and k > d and k < 95
+bearMomentum = k < 50 and k < d and k > 5
+
+swLowNow  = ta.lowest(low, lookback)
+swHighNow = ta.highest(high, lookback)
+
+// swing pivots ล่าสุดที่ยืนยันแล้ว
+var float lastPH = na
+var float lastPL = na
+ph = ta.pivothigh(high, pivLeft, pivRight)
+pl = ta.pivotlow(low, pivLeft, pivRight)
+if not na(ph)
+    lastPH := ph
+if not na(pl)
+    lastPL := pl
+
+// ============================================================
+// ENTRY SIGNAL — Reversal: 2-soldiers กลับตัว + StochRSI momentum
+// ============================================================
+bodyPctOK(idx) =>
+    rng = high[idx] - low[idx]
+    rng > 0 and math.abs(close[idx] - open[idx]) / rng * 100.0 >= minBodyPct
+
+longSig = close[2] < open[2] and
+     close[1] > open[1] and close > open and
+     close[1] > close[2] and close > close[1] and
+     close > high[1] and
+     bodyPctOK(1) and bodyPctOK(0) and
+     bullMomentum
+shortSig = close[2] > open[2] and
+     close[1] < open[1] and close < open and
+     close[1] < close[2] and close < close[1] and
+     close < low[1] and
+     bodyPctOK(1) and bodyPctOK(0) and
+     bearMomentum
+
+// ============================================================
+// SETUP — freeze fib levels แล้วส่ง order (fill ที่ open แท่งถัดไป)
+// ============================================================
+var float slInit    = na
+var float tpLvl     = na
+var float lvlBeTrig = na
+var float lvlLkTrig = na
+var float lvlLkTo   = na
+var float curSL     = na
+var int   beStage   = 0
+
+flatNow = strategy.position_size == 0
+setupLong = false
+setupShort = false
+
+if longSig and flatNow
+    swLc = swLowNow
+    swHc = math.max(swHighNow, nz(lastPH, swHighNow))
+    rng = swHc - swLc
+    entryFib = rng > 0 ? (close - swLc) / rng : 1.0
+    slCand = slMode == "Swing" ? swLc :
+         slMode == "Fixed ticks" ? close - slTicks * syminfo.mintick :
+         swLc - atrBuf * atr
+    risk = close - slCand
+    tpCand = tpMode == "Fib adaptive" ? pickTpLong(swLc, rng, close, risk, minRR) :
+         isFibTP ? swLc + tpFib * rng : close + tpDist
+    reward = tpCand - close
+    if rng >= minRangeATR * atr and entryFib <= maxEntryFib and risk > 0 and reward >= minRR * risk
+        slInit    := slCand
+        tpLvl     := tpCand
+        lvlBeTrig := swLc + beTrigFib * rng
+        lvlLkTrig := swLc + lkTrigFib * rng
+        lvlLkTo   := swLc + lkToFib * rng
+        setupLong := true
+        strategy.entry("Long", strategy.long)
+
+if shortSig and flatNow
+    swHc = swHighNow
+    swLc = math.min(swLowNow, nz(lastPL, swLowNow))
+    rng = swHc - swLc
+    entryFib = rng > 0 ? (swHc - close) / rng : 1.0
+    slCand = slMode == "Swing" ? swHc :
+         slMode == "Fixed ticks" ? close + slTicks * syminfo.mintick :
+         swHc + atrBuf * atr
+    risk = slCand - close
+    tpCand = tpMode == "Fib adaptive" ? pickTpShort(swHc, rng, close, risk, minRR) :
+         isFibTP ? swHc - tpFib * rng : close - tpDist
+    reward = close - tpCand
+    if rng >= minRangeATR * atr and entryFib <= maxEntryFib and risk > 0 and reward >= minRR * risk
+        slInit    := slCand
+        tpLvl     := tpCand
+        lvlBeTrig := swHc - beTrigFib * rng
+        lvlLkTrig := swHc - lkTrigFib * rng
+        lvlLkTo   := swHc - lkToFib * rng
+        setupShort := true
+        strategy.entry("Short", strategy.short)
+
+// ============================================================
+// POSITION MANAGEMENT — ladder: BE trigger → BE, SL-lock trigger → SL-lock target
+// ============================================================
+justOpened = strategy.position_size != 0 and strategy.position_size[1] == 0
+if justOpened
+    curSL   := slInit
+    beStage := 0
+    // โหมดอิง entry (ATR x / Fixed pips): อิงราคา fill จริง (ตอน setup ใช้ close ประมาณการ)
+    if not isFibTP
+        dirSign = strategy.position_size > 0 ? 1.0 : -1.0
+        ep0 = strategy.position_avg_price
+        tpLvl     := ep0 + dirSign * tpDist
+        lvlBeTrig := ep0 + dirSign * tpDist * beTrigPct / 100.0
+        lvlLkTrig := ep0 + dirSign * tpDist * lkTrigPct / 100.0
+        lvlLkTo   := ep0 + dirSign * tpDist * lkToPct / 100.0
+
+if strategy.position_size > 0
+    ep = strategy.position_avg_price
+    if beStage < 1 and high >= lvlBeTrig
+        curSL   := math.max(curSL, ep + beBufPts * syminfo.mintick)
+        beStage := 1
+    if beStage < 2 and high >= lvlLkTrig
+        curSL   := math.max(curSL, lvlLkTo)
+        beStage := 2
+    strategy.exit("XL", from_entry = "Long", stop = curSL, limit = tpLvl)
+
+if strategy.position_size < 0
+    ep = strategy.position_avg_price
+    if beStage < 1 and low <= lvlBeTrig
+        curSL   := math.min(curSL, ep - beBufPts * syminfo.mintick)
+        beStage := 1
+    if beStage < 2 and low <= lvlLkTrig
+        curSL   := math.min(curSL, lvlLkTo)
+        beStage := 2
+    strategy.exit("XS", from_entry = "Short", stop = curSL, limit = tpLvl)
+
+// ============================================================
+// VISUALIZATION — เส้น SL/TP จริงวาดอัตโนมัติจาก exit_levels อยู่แล้ว
+// ============================================================
+inPos = strategy.position_size != 0
+plot(inPos ? lvlBeTrig : na, "BE trigger fib",      color = color.new(color.orange, 0), style = plot.style_linebr)
+plot(inPos ? lvlLkTrig : na, "SL-lock trigger fib", color = color.new(color.purple, 0), style = plot.style_linebr)
+plotshape(setupLong,  title = "Long Setup",  style = shape.triangleup,
+     location = location.belowbar, color = color.new(color.green, 0), text = "BUY")
+plotshape(setupShort, title = "Short Setup", style = shape.triangledown,
+     location = location.abovebar, color = color.new(color.red, 0), text = "SELL")

@@ -97,6 +97,12 @@ class TesterMetrics(BaseModel):
     open_pl: float = 0.0
 
 
+class ExitLevels(BaseModel):
+    """Per-bar active strategy.exit SL/TP prices (null when flat / no rule)."""
+    stop: List[Optional[float]] = []
+    limit: List[Optional[float]] = []
+
+
 class PineBacktestResponse(BaseModel):
     ok: bool
     script_type: Optional[str] = None
@@ -108,6 +114,7 @@ class PineBacktestResponse(BaseModel):
     hlines: List[HLine] = []
     trades: List[TradeRecord] = []
     equity: List[Optional[float]] = []  # per-bar equity curve (strategy only)
+    exit_levels: Optional[ExitLevels] = None
     metrics: Optional[TesterMetrics] = None
 
 

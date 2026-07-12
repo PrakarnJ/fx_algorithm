@@ -88,6 +88,7 @@ def run(program: A.Program, df: pd.DataFrame,
         "hlines": list(interp.collector.hlines.values()),
         "trades": [],
         "equity": [],
+        "exit_levels": None,
         "metrics": None,
     }
 
@@ -106,6 +107,10 @@ def run(program: A.Program, df: pd.DataFrame,
             "exit_reason": t.exit_reason,
         } for t in broker.closed]
         result["equity"] = [round(e, 2) for e in broker.equity_curve]
+        result["exit_levels"] = {
+            "stop": [_clean(v) for v in broker.sl_history],
+            "limit": [_clean(v) for v in broker.tp_history],
+        }
         result["metrics"] = broker.metrics()
 
     return result
